@@ -2,25 +2,26 @@ use std::fs::File;
 use std::io::Read;
 use std::time::SystemTime;
 
-use clap::{Arg, App};
-use express::parse::{strip_comments_and_lower, parse};
+use clap::Parser;
+use express::parse::{parse, strip_comments_and_lower};
+
+#[derive(Parser)]
+#[clap(author, version, about, long_about = None)]
+struct Args {
+    /// Input EXPRESS file to parse
+    input: String,
+    
+    /// Disable output
+    #[clap(short, long)]
+    quiet: bool,
+    
+    /// Output file (optional)
+    output: Option<String>,
+}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let matches = App::new("parse_exp")
-        .author("Matt Keeter <matt@formlabs.com>")
-        .about("Parses an EXPRESS file")
-        .arg(Arg::with_name("input")
-            .takes_value(true)
-            .required(true))
-        .arg(Arg::with_name("quiet")
-            .short("q")
-            .long("quiet")
-            .help("disable output"))
-        .arg(Arg::with_name("output")
-            .takes_value(true))
-        .get_matches();
-    let input = matches.value_of("input")
-        .expect("Could not get input file");
+    let args = Args::parse();
+    let input = &args.input;
 
     let mut f = File::open(input).expect("file opens");
     let mut buffer = Vec::new();
@@ -36,10 +37,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match parsed {
         Err(e) => eprintln!("Got err {:?}", e),
-        Ok((_, ref mut p)) => {
-            match matches.value_of("output") {
-                Some(o) => std::fs::write(o, format!("Parse tree:\n{:#?}", p))?,
-                _ => if !matches.is_present("quiet") {
+        Ok((_, ref mut p)) => match &args.output {
+            Some(output) => std::fs::write(output, format!("Parse tree:\n{:#?}", p))?,
+            _ => {
+                if !args.quiet {
                     println!("Parse tree:\n{:#?}", parsed);
                 }
             }

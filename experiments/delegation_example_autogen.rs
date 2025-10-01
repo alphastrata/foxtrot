@@ -2,7 +2,7 @@
 use crate::id::{dynamic_cast, Id};
 use ambassador::{delegatable_trait, Delegate};
 use std::any::{Any, TypeId};
-use std::collections::HashMap;
+use ahash::AHashMap;
 
 // Types for Animal entity:
 
@@ -151,7 +151,7 @@ impl VetRecordTrait for VetRecord {
     }
 }
 
-pub(crate) fn lookup_autogen<T>(id: &Id<T>, storage: &HashMap<usize, Box<dyn Any>>) -> Option<T>
+pub(crate) fn lookup_autogen<T>(id: &Id<T>, storage: &AHashMap<usize, Box<dyn Any>>) -> Option<T>
 where
     T: Any + Clone,
 {

@@ -1,6 +1,6 @@
-use nalgebra_glm::{dot, length, length2, DMat2x2, DVec2, DVec3};
 use crate::{abstract_surface::AbstractSurface, nd_surface::NDBSplineSurface};
 use log::error;
+use nalgebra_glm::{DMat2x2, DVec2, DVec3, dot, length, length2};
 
 #[derive(Debug, Clone)]
 pub struct SampledSurface<const N: usize> {
@@ -9,7 +9,8 @@ pub struct SampledSurface<const N: usize> {
 }
 
 impl<const N: usize> SampledSurface<N>
-    where NDBSplineSurface<N>: AbstractSurface
+where
+    NDBSplineSurface<N>: AbstractSurface,
 {
     pub fn new(surf: NDBSplineSurface<N>) -> Self {
         const N: usize = 8;
@@ -38,8 +39,7 @@ impl<const N: usize> SampledSurface<N>
 
                         let v_span = surf.v_knots.find_span(v);
                         let v_basis = surf.v_knots.basis_funs_for_span(v_span, v);
-                        let q = surf.point_from_basis(
-                            u_span, &u_basis, v_span, &v_basis);
+                        let q = surf.point_from_basis(u_span, &u_basis, v_span, &v_basis);
                         samples.push((uv, q));
                     }
                 }
@@ -154,9 +154,12 @@ impl<const N: usize> SampledSurface<N>
     pub fn uv_from_point(&self, p: DVec3) -> Option<DVec2> {
         assert!(!self.samples.is_empty());
         use ordered_float::OrderedFloat;
-        let best_uv = self.samples.iter()
+        let best_uv = self
+            .samples
+            .iter()
             .min_by_key(|(_uv, pos)| OrderedFloat((pos - p).norm()))
-            .unwrap().0;
+            .unwrap()
+            .0;
         self.uv_from_point_newtons_method(p, best_uv)
     }
 }

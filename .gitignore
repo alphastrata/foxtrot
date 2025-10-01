@@ -8,3 +8,6 @@ Cargo.lock
 .vscode
 wasm/target
 wasm/pkg
+*.png
+*.step
+*.stp

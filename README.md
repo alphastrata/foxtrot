@@ -1,13 +1,26 @@
 # Foxtrot
 
-Foxtrot is a **fast** viewer for
-[STEP files](https://en.wikipedia.org/wiki/ISO_10303-21),
-a standard interchange format for mechanical [CAD](https://en.wikipedia.org/wiki/Computer-aided_design).
 It is an _experimental_ project built from the ground up,
 including new libraries for parsing and triangulation.
 
-This repository includes a simple native GUI:
+A family tools for working with `STEP` files, including:
+- `cdt`: Constrained Delaunay triangulation (standalone)
+- `express`: Parser for EXPRESS schemas files and a matching code generation
+  system
+- `experiments`: Experiments with trait systems (unused)
+- `step`: Auto-generated STEP file parser.  This take a _very_ long time to
+  compile, so it is isolated into this crate.
+- `triangulate`: Converts a file loaded by `step` into a triangle mesh, using
+  `cdt` as its core
+- `nurbs`: A handful of NURBS / B-spline algorithms used by `triangulate`
+- `gui`: GUI for rendering STEP files, using WebGPU
+- `wasm`: Scaffolding to run in the browser using WebAssembly
+- `thumbnailer`: Command-line utility for generating PNG thumbnails from STEP files, also using WebGPU (headless).
+- Foxtrot GUI is a **fast** viewer for
+[STEP files](https://en.wikipedia.org/wiki/ISO_10303-21),
+a standard interchange format for mechanical [CAD](https://en.wikipedia.org/wiki/Computer-aided_design).
 
+## Native GUI:
 ![Motherboard example](https://mattkeeter.com/projects/foxtrot/rpi.png)  
 ([demo model source](https://grabcad.com/library/raspberry-pi-3-reference-design-model-b-rpi-raspberrypi-raspberry-pi-1))
 
@@ -35,18 +48,20 @@ python3 -m http.server --directory deploy # or the simple server of your choice
 Then, open the local server's URL (typically `127.0.0.1:8000`)
 and select a sample file from the list.
 
-## Subsystems
-- `cdt`: Constrained Delaunay triangulation (standalone)
-- `express`: Parser for EXPRESS schemas files and a matching code generation
-  system
-- `experiments`: Experiments with trait systems (unused)
-- `step`: Auto-generated STEP file parser.  This take a _very_ long time to
-  compile, so it is isolated into this crate.
-- `triangulate`: Converts a file loaded by `step` into a triangle mesh, using
-  `cdt` as its core
-- `nurbs`: A handful of NURBS / B-spline algorithms used by `triangulate`
-- `gui`: GUI for rendering STEP files, using WebGPU
-- `wasm`: Scaffolding to run in the browser using WebAssembly
+## Thumbaniler/Still generation:
+
+The thumbnailer can generate thumbnails from STEP files using two different engines:
+1. Foxtrot (default) - Our own implementation
+2. OCCT (OpenCASCADE) - Requires the `occt` feature, this is very useful for those interested in comparing the `foxtrot` library/parsing/triangualtion code etc with the industry incumbent.
+
+### Usage:
+```bash
+# Using the default Foxtrot engine
+cargo run --bin step_thumbnailer -- -i examples/cube_hole.step -o cube_hole.png --size 512
+
+# Using the OCCT engine
+cargo run --bin step_thumbnailer --features occt -- -i examples/cube_hole.step -o cube_hole.png --size 512 --engine occt
+```
 
 ## Code generation
 `step/src/ap214.rs` is automatically generated from

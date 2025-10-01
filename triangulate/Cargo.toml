@@ -2,21 +2,47 @@
 name = "triangulate"
 version = "0.1.0"
 authors = ["Matt Keeter <matt.j.keeter@gmail.com>"]
-edition = "2018"
+edition = "2024"
 
 [dependencies]
 cdt = { path = "../cdt" }
 nurbs = { path = "../nurbs" }
 step = { path = "../step" }
+log = { workspace = true }
+nalgebra-glm = { workspace = true }
+thiserror = { workspace = true }
+naga = { version = "27.0.0", features = ["wgsl-in"] }
+ahash = { workspace = true }
+rayon = { workspace = true, optional = true }
+wgpu = { workspace = true, optional = true }
+pollster = { workspace = true, optional = true }
+bytemuck = { workspace = true, optional = true }
+nalgebra = { workspace = true, optional = true }
 
-log = "0.4.14"
-nalgebra-glm = "0.13.0"
-rayon = { version = "1.5", optional = true }
-thiserror = "1.0"
 
-[features]
-parallel = ["rayon", "step/parallel"]
 
 [dev-dependencies]
-clap = "2.33"
-env_logger = "0.8"
+clap = { workspace = true, features = ["derive"] }
+criterion = { workspace = true, features = ["html_reports"] }
+env_logger = { workspace = true }
+
+[features]
+rayon = ["dep:rayon", "step/rayon", "dep:nalgebra"]
+wgpu = ["dep:wgpu", "dep:pollster", "dep:bytemuck", "rayon"]
+test = ["wgpu", "rayon"]
+
+[[bench]]
+name = 'triangulation_benchmark'
+harness = false
+required-features = ["rayon", "wgpu"]
+
+[[bench]]
+name = 'batch_triangulation'
+harness = false
+required-features = ["rayon", "wgpu"]
+
+
+[[bench]]
+name = 'batch_scaling'
+harness = false
+required-features = ["rayon", "wgpu"]

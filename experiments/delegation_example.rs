@@ -1,16 +1,16 @@
 use std::any::Any;
-use std::collections::HashMap;
+use ahash::AHashMap;
 
 use crate::delegation_example_autogen::*;
 use crate::id::Id;
 
 // Use the `Any` trait to store any of our types in the HashMap, instead of creating a big global enum for all of them.
 #[derive(Debug)]
-pub struct Storage(HashMap<usize, Box<dyn Any>>);
+pub struct Storage(AHashMap<usize, Box<dyn Any>>);
 
 impl Storage {
     pub fn new() -> Self {
-        Storage(HashMap::new())
+        Storage(AHashMap::new())
     }
 
     pub fn insert<T>(&mut self, raw_id: usize, entity: T)

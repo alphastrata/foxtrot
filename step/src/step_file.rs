@@ -1,5 +1,5 @@
-use memchr::{memchr, memchr2, memchr_iter};
 use log::warn;
+use memchr::{memchr, memchr_iter, memchr2};
 
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
@@ -16,14 +16,14 @@ impl<'a> StepFile<'a> {
     /// Parses a STEP file from a raw array of bytes
     /// `data` must be preprocessed by [`strip_flatten`] first
     pub fn parse(data: &'a [u8]) -> Self {
-        let blocks = Self::into_blocks(&data);
-        let data_start = blocks.iter()
-            .position(|b| b == b"DATA;")
-            .unwrap_or(0) + 1;
-        let data_end = blocks.iter()
+        let blocks = Self::into_blocks(data);
+        let data_start = blocks.iter().position(|b| b == b"DATA;").unwrap_or(0) + 1;
+        let data_end = blocks
+            .iter()
             .skip(data_start)
             .position(|b| b == b"ENDSEC;")
-            .unwrap_or(0) + data_start;
+            .unwrap_or(0)
+            + data_start;
 
         // Parse every block, accumulating a Vec of Results.  We parse in
         // single-threaded mode in WASM builds, because there's no thread
@@ -31,28 +31,34 @@ impl<'a> StepFile<'a> {
         let block_iter = {
             let block_slice = &blocks[data_start..data_end];
             #[cfg(feature = "rayon")]
-            { block_slice.par_iter() }
+            {
+                block_slice.par_iter()
+            }
             #[cfg(not(feature = "rayon"))]
-            { block_slice.iter() }
+            {
+                block_slice.iter()
+            }
         };
 
         let parsed: Vec<(usize, Entity)> = block_iter
-            .filter_map(|b| parse_entity_decl(*b)
-                .or_else(|e| {
-                    warn!("Failed to parse {}: {:?}",
-                        std::str::from_utf8(b).unwrap_or("[INVALID UTF-8]"),
-                              e);
-                    parse_entity_fallback(*b)
-                })
-                .ok())
+            .filter_map(|b| {
+                parse_entity_decl(b)
+                    .or_else(|e| {
+                        warn!(
+                            "Failed to parse {}: {:?}",
+                            std::str::from_utf8(b).unwrap_or("[INVALID UTF-8]"),
+                            e
+                        );
+                        parse_entity_fallback(b)
+                    })
+                    .ok()
+            })
             .map(|b| b.1)
             .collect();
 
         // Awkward construction because `Entity` is not `Clone`
         let max_id = parsed.iter().map(|b| b.0).max().unwrap_or(0);
-        let mut out: Vec<Entity> = (0..=max_id)
-            .map(|_| Entity::_EmptySlot)
-            .collect();
+        let mut out: Vec<Entity> = (0..=max_id).map(|_| Entity::_EmptySlot).collect();
 
         for p in parsed.into_iter() {
             out[p.0] = p.1;
@@ -67,11 +73,13 @@ impl<'a> StepFile<'a> {
         let mut i = 0;
         while i < data.len() {
             match data[i] {
-                b'/' => if i + 1 < data.len() && data[i + 1] == b'*' {
-                    for j in memchr_iter(b'/', &data[i + 2..]) {
-                        if data[i + j + 1] == b'*' {
-                            i += j + 2;
-                            break;
+                b'/' => {
+                    if i + 1 < data.len() && data[i + 1] == b'*' {
+                        for j in memchr_iter(b'/', &data[i + 2..]) {
+                            if data[i + j + 1] == b'*' {
+                                i += j + 2;
+                                break;
+                            }
                         }
                     }
                 }
@@ -100,7 +108,7 @@ impl<'a> StepFile<'a> {
 
                     i += next + 1; // Skip the semicolon
                     start = i;
-                },
+                }
                 _ => unreachable!(),
             }
         }
