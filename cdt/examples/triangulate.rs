@@ -1,49 +1,43 @@
-use std::iter::repeat_with;
 use rand::{Rng, SeedableRng};
+use std::iter::repeat_with;
 
-use clap::{Arg, App};
+use clap::Parser;
 use itertools::Itertools;
 
 const N: usize = 1_000_000;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let matches = App::new("triangulate")
-        .author("Matt Keeter <matt.j.keeter@gmail.com>")
-        .about("Triangulates random points")
-        .arg(Arg::with_name("num")
-            .short("n")
-            .long("num")
-            .help("number of points")
-            .takes_value(true))
-        .arg(Arg::with_name("output")
-            .short("o")
-            .long("out")
-            .help("svg file to target")
-            .takes_value(true))
-        .arg(Arg::with_name("check")
-            .short("c")
-            .long("check")
-            .help("check invariants after each step (slow)"))
-        .arg(Arg::with_name("seed")
-            .short("s")
-            .long("seed")
-            .help("seed for RNG")
-            .takes_value(true))
-        .get_matches();
+#[derive(Parser)]
+#[clap(author, version, about, long_about = None)]
+struct Args {
+    /// Number of points
+    #[clap(short, long, default_value_t = N)]
+    num: usize,
+    
+    /// SVG file to output
+    #[clap(short, long = "out")]
+    output: Option<String>,
+    
+    /// Check invariants after each step (slow)
+    #[clap(short, long)]
+    check: bool,
+    
+    /// Seed for RNG
+    #[clap(short, long)]
+    seed: Option<u64>,
+}
 
-    let num = matches.value_of("num")
-        .map(|s| s.parse())
-        .unwrap_or(Ok(N))?;
-    let seed: u64 = matches.value_of("seed")
-        .map(|s| s.parse())
-        .unwrap_or_else(|| Ok(rand::thread_rng().gen()))?;
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args = Args::parse();
+
+    let num = args.num;
+    let seed: u64 = args.seed.unwrap_or_else(rand::random);
 
     // Use a ChaCha RNG to be reproducible across platforms
     let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed);
 
     // Sample as f32 to match the behavior in fuzz.rs
     // (to increase likelihood of collisions)
-    let points: Vec<_> = repeat_with(|| rng.gen_range(0.0..1.0))
+    let points: Vec<_> = repeat_with(|| rng.random_range(0.0..1.0))
         .tuple_windows()
         .map(|(a, b): (f32, f32)| (a as f64, b as f64))
         .take(num)
@@ -54,7 +48,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut t = cdt::Triangulation::new(&points)?;
     while !t.done() {
         t.step()?;
-        if matches.is_present("check") {
+        if args.check {
             t.check();
         }
     }
@@ -69,9 +63,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         result.len(),
     );
 
-    if let Some(out) = matches.value_of("output") {
-        eprintln!("    Saving {}", out);
-        t.save_debug_svg(out).expect("Could not save SVG");
+    if let Some(output) = &args.output {
+        eprintln!("    Saving {}", output);
+        t.save_debug_svg(output).expect("Could not save SVG");
     }
     Ok(())
 }

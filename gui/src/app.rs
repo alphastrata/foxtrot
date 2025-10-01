@@ -1,20 +1,22 @@
-use nalgebra_glm as glm;
 use glm::Vec2;
+use nalgebra_glm as glm;
 use winit::{
-    dpi::{PhysicalSize},
-    event::{ElementState, ModifiersState, WindowEvent, DeviceEvent, VirtualKeyCode, MouseScrollDelta},
+    dpi::PhysicalSize,
+    event::{
+        DeviceEvent, ElementState, MouseScrollDelta, WindowEvent,
+    },
+    keyboard::ModifiersState,
 };
 
-use triangulate::mesh::Mesh;
 use crate::{backdrop::Backdrop, camera::Camera, model::Model};
+use triangulate::mesh::Mesh;
 
 pub struct App {
     start_time: std::time::SystemTime,
 
-    surface: wgpu::Surface,
     device: wgpu::Device,
-    swapchain_format: wgpu::TextureFormat,
-    swapchain: wgpu::SwapChain,
+    surface_config: wgpu::SurfaceConfiguration,
+    pub surface_format: wgpu::TextureFormat,
 
     loader: Option<std::thread::JoinHandle<Mesh>>,
     model: Option<Model>,
@@ -36,30 +38,46 @@ pub enum Reply {
 }
 
 impl App {
-    pub fn new(start_time: std::time::SystemTime, size: PhysicalSize<u32>,
-               adapter: wgpu::Adapter, surface: wgpu::Surface,
-               device: wgpu::Device, loader: std::thread::JoinHandle<Mesh>)
-        -> Self
-    {
-        let swapchain_format = adapter.get_swap_chain_preferred_format(&surface)
-            .expect("Could not get swapchain format");
+    pub fn new(
+        start_time: std::time::SystemTime,
+        size: PhysicalSize<u32>,
+        adapter: wgpu::Adapter,
+        surface: &wgpu::Surface,  
+        device: wgpu::Device,
+        loader: std::thread::JoinHandle<Mesh>,
+    ) -> Self {
+        
+        let capabilities = surface.get_capabilities(&adapter);
+        let surface_format = capabilities.formats
+            .iter()
+            .find(|format| format.is_srgb())
+            .copied()
+            .unwrap_or(capabilities.formats[0]);
 
-        let swapchain = Self::rebuild_swapchain_(
-            size, swapchain_format, &surface, &device);
+        let surface_config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format: surface_format,
+            width: size.width,
+            height: size.height,
+            present_mode: wgpu::PresentMode::Fifo,
+            alpha_mode: wgpu::CompositeAlphaMode::Auto,
+            view_formats: vec![],
+            desired_maximum_frame_latency: 2,
+        };
+        
         let depth = Self::rebuild_depth_(size, &device);
-        let backdrop = Backdrop::new(&device, swapchain_format);
+        let backdrop = Backdrop::new(&device, surface_format);
 
         Self {
             start_time,
 
-            swapchain,
+            surface_config,
+            surface_format,
             depth,
             backdrop,
-            swapchain_format,
             loader: Some(loader),
             model: None,
             camera: Camera::new(size.width as f32, size.height as f32),
-            surface,
             device,
             size,
 
@@ -70,11 +88,10 @@ impl App {
     }
 
     pub fn device_event(&mut self, e: DeviceEvent) {
-        if let DeviceEvent::MouseWheel { delta } = e {
-            if let MouseScrollDelta::PixelDelta(p) = delta {
+        if let DeviceEvent::MouseWheel { delta } = e
+            && let MouseScrollDelta::PixelDelta(p) = delta {
                 self.camera.mouse_scroll(p.y as f32);
             }
-        }
     }
 
     pub fn window_event(&mut self, e: WindowEvent) -> Reply {
@@ -82,23 +99,26 @@ impl App {
             WindowEvent::Resized(size) => {
                 self.resize(size);
                 Reply::Redraw
-            },
-            WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
-                self.resize(*new_inner_size);
+            }
+            WindowEvent::ScaleFactorChanged { inner_size_writer: _, .. } => {
+                
+                self.resize(self.size);
                 Reply::Redraw
-            },
+            }
             WindowEvent::CloseRequested => Reply::Quit,
             WindowEvent::ModifiersChanged(m) => {
-                self.modifiers = m;
+                self.modifiers = m.state();
                 Reply::Continue
-            },
-            WindowEvent::KeyboardInput { input, .. } => {
-                if self.modifiers.logo() && input.virtual_keycode == Some(VirtualKeyCode::Q) {
+            }
+            WindowEvent::KeyboardInput { event, .. } => {
+                use winit::keyboard::Key;
+                if self.modifiers.control_key() && 
+                   matches!(event.logical_key, Key::Character(ref c) if c.as_str() == "q") {
                     Reply::Quit
                 } else {
                     Reply::Continue
                 }
-            },
+            }
             WindowEvent::MouseInput { button, state, .. } => {
                 use ElementState::*;
                 match state {
@@ -108,31 +128,32 @@ impl App {
                 Reply::Continue
             }
             WindowEvent::CursorMoved { position, .. } => {
-                self.camera.mouse_move(Vec2::new(position.x as f32, position.y as f32));
+                self.camera
+                    .mouse_move(Vec2::new(position.x as f32, position.y as f32));
                 Reply::Redraw
-            },
-            WindowEvent::MouseWheel { delta, ..} => {
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
                 if let MouseScrollDelta::LineDelta(_, verti) = delta {
                     self.camera.mouse_scroll(verti * 10.0);
                 }
                 Reply::Redraw
-            },
+            }
             _ => Reply::Continue,
         }
     }
 
     fn resize(&mut self, size: PhysicalSize<u32>) {
         self.size = size;
-        self.swapchain = Self::rebuild_swapchain_(
-            size, self.swapchain_format,
-            &self.surface, &self.device);
+        self.surface_config.width = size.width;
+        self.surface_config.height = size.height;
         self.depth = Self::rebuild_depth_(size, &self.device);
         self.camera.set_size(size.width as f32, size.height as f32);
     }
 
-    fn rebuild_depth_(size: PhysicalSize<u32>, device: &wgpu::Device)
-        -> (wgpu::Texture, wgpu::TextureView)
-    {
+    fn rebuild_depth_(
+        size: PhysicalSize<u32>,
+        device: &wgpu::Device,
+    ) -> (wgpu::Texture, wgpu::TextureView) {
         let size = wgpu::Extent3d {
             width: size.width,
             height: size.height,
@@ -145,44 +166,36 @@ impl App {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Depth32Float,
-            usage: wgpu::TextureUsage::RENDER_ATTACHMENT |
-                   wgpu::TextureUsage::SAMPLED,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
         };
         let tex = device.create_texture(&desc);
         let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
         (tex, view)
     }
 
-    fn rebuild_swapchain_(size: PhysicalSize<u32>, format: wgpu::TextureFormat,
-                          surface: &wgpu::Surface, device: &wgpu::Device)
-        -> wgpu::SwapChain
-    {
-        let sc_desc = wgpu::SwapChainDescriptor {
-            usage: wgpu::TextureUsage::RENDER_ATTACHMENT,
-            format: format,
-            width: size.width,
-            height: size.height,
-            present_mode: wgpu::PresentMode::Mailbox,
-        };
-        device.create_swap_chain(surface, &sc_desc)
-    }
 
-    // Redraw the GUI, returning true if the model was not drawn (which means
-    // that the parent loop should keep calling redraw to force model load)
-    pub fn redraw(&mut self, queue: &wgpu::Queue) -> bool {
-        let frame = self.swapchain
-            .get_current_frame()
-            .expect("Failed to acquire next swap chain texture")
-            .output;
-        let mut encoder = self.device.create_command_encoder(
-            &wgpu::CommandEncoderDescriptor { label: None });
 
-        self.backdrop.draw(&frame, &self.depth.1, &mut encoder);
+    
+    
+    pub fn redraw(&mut self, surface: &wgpu::Surface, queue: &wgpu::Queue) -> bool {
+        let frame = surface
+            .get_current_texture()
+            .expect("Failed to acquire next swap chain texture");
+        let view = frame
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+
+        self.backdrop.draw(&view, &self.depth.1, &mut encoder);
         if let Some(model) = &self.model {
-            model.draw(&self.camera, &queue, &frame, &self.depth.1, &mut encoder);
+            model.draw(&self.camera, queue, &view, &self.depth.1, &mut encoder);
         }
         let drew_model = self.model.is_some();
         queue.submit(Some(encoder.finish()));
+        frame.present();
 
         if drew_model && self.first_frame {
             let end = std::time::SystemTime::now();
@@ -191,17 +204,23 @@ impl App {
             self.first_frame = false;
         }
 
-        // This is very awkward, but WebGPU doesn't actually do the GPU work
-        // until after a queue is submitted, so we don't wait to wait for
-        // the model until the _second_ frame.
+        
+        
+        
         if !self.first_frame && self.model.is_none() {
             println!("Waiting for mesh");
-            let mesh = self.loader.take()
+            let mesh = self
+                .loader
+                .take()
                 .unwrap()
                 .join()
                 .expect("Failed to load mesh");
-            let model = Model::new(&self.device, self.swapchain_format,
-                                   &mesh.verts, &mesh.triangles);
+            let model = Model::new(
+                &self.device,
+                self.surface_format,
+                &mesh.verts,
+                &mesh.triangles,
+            );
             self.model = Some(model);
             self.camera.fit_verts(&mesh.verts);
             self.first_frame = true;

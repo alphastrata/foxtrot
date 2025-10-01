@@ -1,6 +1,5 @@
-use itertools::Itertools;
+use glm::{Mat4, Vec2, Vec3, Vec4};
 use nalgebra_glm as glm;
-use glm::{Vec2, Vec3, Vec4, Mat4};
 use winit::event::MouseButton;
 
 use triangulate::mesh::Vertex;
@@ -33,13 +32,16 @@ pub struct Camera {
     mouse: MouseState,
 }
 
-
 impl Camera {
     pub fn new(width: f32, height: f32) -> Self {
         Camera {
-            width, height,
-            pitch: 0.0,
-            yaw: 0.0,
+            width,
+            height,
+            // Isometric projection: 45° around Y axis, ~35.26° around X axis
+            // pitch controls rotation around Y axis: glm::rotate_y(&i, self.pitch)
+            // yaw controls rotation around X axis: glm::rotate_x(&i, self.yaw)
+            pitch: (45.0_f32).to_radians(),   // 45 degrees around Y axis
+            yaw: (35.26_f32).to_radians(),   // ~35.26 degrees around X axis  
             scale: 1.0,
             center: Vec3::zeros(),
             mouse: MouseState::Unknown,
@@ -53,17 +55,19 @@ impl Camera {
                 MouseButton::Left => Some(MouseState::Rotate(*pos)),
                 MouseButton::Right => Some(MouseState::Pan(*pos, self.mouse_pos(*pos))),
                 _ => None,
-            }.map(|m| self.mouse = m);
+            }
+            .map(|m| self.mouse = m);
         }
     }
     pub fn mouse_released(&mut self, button: MouseButton) {
         match &self.mouse {
-            MouseState::Rotate(pos) if button == MouseButton::Left =>
-                Some(MouseState::Free(*pos)),
-            MouseState::Pan(pos, ..) if button == MouseButton::Right =>
-                Some(MouseState::Free(*pos)),
+            MouseState::Rotate(pos) if button == MouseButton::Left => Some(MouseState::Free(*pos)),
+            MouseState::Pan(pos, ..) if button == MouseButton::Right => {
+                Some(MouseState::Free(*pos))
+            }
             _ => None,
-        }.map(|m| self.mouse = m);
+        }
+        .map(|m| self.mouse = m);
     }
 
     pub fn mat(&self) -> Mat4 {
@@ -82,7 +86,7 @@ impl Camera {
     }
 
     pub fn mouse_move(&mut self, new_pos: Vec2) {
-        let x_norm =  2.0 * (new_pos.x / self.width - 0.5);
+        let x_norm = 2.0 * (new_pos.x / self.width - 0.5);
         let y_norm = -2.0 * (new_pos.y / self.height - 0.5);
         let new_pos = Vec2::new(x_norm, y_norm);
 
@@ -92,20 +96,19 @@ impl Camera {
                 let current_pos = self.mouse_pos(new_pos);
                 let delta_pos = orig - current_pos;
                 self.center += delta_pos;
-            },
+            }
             MouseState::Rotate(pos) => {
                 let delta = new_pos - *pos;
-                self.spin(delta.x * 3.0,
-                          -delta.y * 3.0 * self.height / self.width);
-            },
+                self.spin(delta.x * 3.0, -delta.y * 3.0 * self.height / self.width);
+            }
             _ => (),
         }
 
         // Store new mouse position
         match &mut self.mouse {
-            MouseState::Free(pos)
-            | MouseState::Pan(pos, ..)
-            | MouseState::Rotate(pos) => *pos = new_pos,
+            MouseState::Free(pos) | MouseState::Pan(pos, ..) | MouseState::Rotate(pos) => {
+                *pos = new_pos
+            }
             MouseState::Unknown => self.mouse = MouseState::Free(new_pos),
         }
     }
@@ -117,16 +120,48 @@ impl Camera {
     }
 
     pub fn fit_verts(&mut self, verts: &[Vertex]) {
-        let xb = verts.iter().map(|v| v.pos.x).minmax().into_option().unwrap();
-        let yb = verts.iter().map(|v| v.pos.y).minmax().into_option().unwrap();
-        let zb = verts.iter().map(|v| v.pos.z).minmax().into_option().unwrap();
-        let dx = xb.1 - xb.0;
-        let dy = yb.1 - yb.0;
-        let dz = zb.1 - zb.0;
-        self.scale = (1.0 / dx.max(dy).max(dz)) as f32;
-        self.center = Vec3::new((xb.0 + xb.1) as f32 / 2.0,
-                                (yb.0 + yb.1) as f32 / 2.0,
-                                (zb.0 + zb.1) as f32 / 2.0);
+        if verts.is_empty() {
+            return;
+        }
+        
+        // Calculate bounding box - vertex positions are f64, cast to f32
+        let mut min_x = f32::MAX;
+        let mut max_x = f32::MIN;
+        let mut min_y = f32::MAX;
+        let mut max_y = f32::MIN;
+        let mut min_z = f32::MAX;
+        let mut max_z = f32::MIN;
+        
+        for vertex in verts {
+            let x = vertex.pos.x as f32;
+            let y = vertex.pos.y as f32;
+            let z = vertex.pos.z as f32;
+            
+            min_x = min_x.min(x);
+            max_x = max_x.max(x);
+            min_y = min_y.min(y);
+            max_y = max_y.max(y);
+            min_z = min_z.min(z);
+            max_z = max_z.max(z);
+        }
+        
+        let dx = max_x - min_x;
+        let dy = max_y - min_y;
+        let dz = max_z - min_z;
+        
+        // Calculate model center
+        self.center = Vec3::new(
+            (min_x + max_x) / 2.0,
+            (min_y + max_y) / 2.0,
+            (min_z + max_z) / 2.0,
+        );
+        
+        // Find the maximum dimension to ensure the longest dimension fills as much of the frame as possible
+        let max_dimension = dx.max(dy).max(dz);
+        
+        // For the GUI's scaling approach, we want to make the max dimension fill ~98% of view
+        // This means the scale should be such that max_dimension * scale = 0.98 (98% of normalized view)
+        self.scale = 0.98 / max_dimension;  // Direct calculation for 98% fill - more aggressive
     }
 
     pub fn set_size(&mut self, width: f32, height: f32) {
@@ -166,7 +201,7 @@ impl Camera {
         self.yaw += dy;
     }
 
-    pub fn scale(&mut self, value: f32, pos: Vec2){
+    pub fn scale(&mut self, value: f32, pos: Vec2) {
         let start_pos = self.mouse_pos(pos);
         self.scale *= value;
         let end_pos = self.mouse_pos(pos);

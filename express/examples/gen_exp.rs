@@ -2,25 +2,26 @@ use std::fs::File;
 use std::io::Read;
 use std::time::SystemTime;
 
-use clap::{Arg, App};
-use express::parse::{strip_comments_and_lower, parse};
+use clap::Parser;
+use express::parse::{parse, strip_comments_and_lower};
+
+#[derive(Parser)]
+#[clap(author, version, about, long_about = None)]
+struct Args {
+    /// Input EXPRESS file to generate from
+    input: String,
+    
+    /// Disable output
+    #[clap(short, long)]
+    quiet: bool,
+    
+    /// Output file (optional)
+    output: Option<String>,
+}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let matches = App::new("parse_exp")
-        .author("Matt Keeter <matt@formlabs.com>")
-        .about("Parses an EXPRESS file")
-        .arg(Arg::with_name("input")
-            .takes_value(true)
-            .required(true))
-        .arg(Arg::with_name("quiet")
-            .short("q")
-            .long("quiet")
-            .help("disable output"))
-        .arg(Arg::with_name("output")
-            .takes_value(true))
-        .get_matches();
-    let input = matches.value_of("input")
-        .expect("Could not get input file");
+    let args = Args::parse();
+    let input = &args.input;
 
     let mut f = File::open(input).expect("file opens");
     let mut buffer = Vec::new();
@@ -37,17 +38,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("parsed in {:?}", since_the_epoch);
 
     let start = SystemTime::now();
-    let gen = express::gen::gen(&mut parsed.1)?;
+    let r#gen = express::generator::generator(&mut parsed.1)?;
     let end = SystemTime::now();
-    let since_the_epoch = end.duration_since(start).expect("Time went backwards");
+    let since_the_epoch = end.duration_since(start).expect("Time goes backwards");
     eprintln!("generated in {:?}", since_the_epoch);
 
-    match matches.value_of("output") {
-        Some(o) => std::fs::write(o, gen)?,
-        None => if !matches.is_present("quiet") {
-            println!("{}", gen)
-        },
+    match &args.output {
+        Some(output) => std::fs::write(output, r#gen)?,
+        None => {
+            if !args.quiet {
+                println!("{}", r#gen)
+            }
+        }
     }
     Ok(())
 }
-

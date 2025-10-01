@@ -1,37 +1,41 @@
 use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
 
+use glm::{DMat4, DVec3, DVec4, U32Vec3};
+use log::{error, info, warn};
 use nalgebra_glm as glm;
-use glm::{DVec3, DVec4, DMat4, U32Vec3};
-use log::{info, warn, error};
 
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
 
-use step::{
-    ap214, ap214::*, step_file::{FromEntity, StepFile}, id::Id, ap214::Entity,
-};
 use crate::{
     Error,
     curve::Curve,
-    mesh, mesh::{Mesh, Triangle},
+    mesh,
+    mesh::{Mesh, Triangle},
     stats::Stats,
-    surface::Surface
+    surface::Surface,
 };
-use nurbs::{BSplineSurface, SampledCurve, SampledSurface, NURBSSurface, KnotVector};
+use nurbs::{BSplineSurface, KnotVector, NURBSSurface, SampledCurve, SampledSurface};
+use step::{
+    ap214,
+    ap214::Entity,
+    ap214::*,
+    id::Id,
+    step_file::{FromEntity, StepFile},
+};
 
 const SAVE_DEBUG_SVGS: bool = false;
 const SAVE_PANIC_SVGS: bool = false;
 
 /// `TransformStack` is a mapping of representations to transformed children.
-type TransformStack<'a> =
-    HashMap<Representation<'a>, Vec<(Representation<'a>, DMat4)>>;
+type TransformStack<'a> = HashMap<Representation<'a>, Vec<(Representation<'a>, DMat4)>>;
 fn build_transform_stack<'a>(s: &'a StepFile, flip: bool) -> TransformStack<'a> {
     // Store a map of parent -> (child, transform)
     let mut transform_stack: HashMap<_, Vec<_>> = HashMap::new();
-    for r in s.0.iter()
-        .filter_map(|e|
-            RepresentationRelationshipWithTransformation_::try_from_entity(e))
+    for r in
+        s.0.iter()
+            .filter_map(RepresentationRelationshipWithTransformation_::try_from_entity)
     {
         let (a, b) = if flip {
             (r.rep_2, r.rep_1)
@@ -40,12 +44,12 @@ fn build_transform_stack<'a>(s: &'a StepFile, flip: bool) -> TransformStack<'a> 
         };
         let mut mat = item_defined_transformation(s, r.transformation_operator.cast());
         if flip {
-            mat = mat.try_inverse().expect("Could not invert transform matrix");
+            mat = mat
+                .try_inverse()
+                .expect("Could not invert transform matrix");
         }
 
-        transform_stack.entry(b)
-            .or_default()
-            .push((a, mat));
+        transform_stack.entry(b).or_default().push((a, mat));
     }
     transform_stack
 }
@@ -64,19 +68,22 @@ fn transform_stack_roots<'a>(transform_stack: &TransformStack<'a>) -> Vec<Repres
 }
 
 pub fn triangulate(s: &StepFile) -> (Mesh, Stats) {
-    let styled_items: Vec<_> = s.0.iter()
-        .filter_map(|e| MechanicalDesignGeometricPresentationRepresentation_::try_from_entity(e))
-        .flat_map(|m| m.items.iter())
-        .filter_map(|item| s.entity(item.cast::<StyledItem_>()))
-        .collect();
-    let brep_colors: HashMap<_, DVec3> = styled_items.iter()
-        .filter_map(|styled|
+    let styled_items: Vec<_> =
+        s.0.iter()
+            .filter_map(MechanicalDesignGeometricPresentationRepresentation_::try_from_entity)
+            .flat_map(|m| m.items.iter())
+            .filter_map(|item| s.entity(item.cast::<StyledItem_>()))
+            .collect();
+
+    let brep_colors: HashMap<_, DVec3> = styled_items
+        .iter()
+        .filter_map(|styled| {
             if styled.styles.len() != 1 {
                 None
             } else {
-                presentation_style_color(s, styled.styles[0])
-                    .map(|c| (styled.item, c))
-            })
+                presentation_style_color(s, styled.styles[0]).map(|c| (styled.item, c))
+            }
+        })
         .collect();
 
     // Store a map of parent -> (child, transform)
@@ -91,9 +98,7 @@ pub fn triangulate(s: &StepFile) -> (Mesh, Stats) {
         transform_stack = build_transform_stack(s, true);
         roots = transform_stack_roots(&transform_stack);
     }
-    let mut todo: Vec<_> = roots.into_iter()
-        .map(|v| (v, DMat4::identity()))
-        .collect();
+    let mut todo: Vec<_> = roots.into_iter().map(|v| (v, DMat4::identity())).collect();
     if todo.len() > 1 {
         warn!("Transformation stack has more than one root!");
     }
@@ -101,9 +106,10 @@ pub fn triangulate(s: &StepFile) -> (Mesh, Stats) {
     // Store a map of ShapeRepresentationRelationships, which some models
     // use to map from axes to specific instances
     let mut shape_rep_relationship: HashMap<Id<_>, Vec<Id<_>>> = HashMap::new();
-    for (r1, r2) in s.0.iter()
-        .filter_map(|e| ShapeRepresentationRelationship_::try_from_entity(e))
-        .map(|e| (e.rep_1, e.rep_2))
+    for (r1, r2) in
+        s.0.iter()
+            .filter_map(ShapeRepresentationRelationship_::try_from_entity)
+            .map(|e| (e.rep_1, e.rep_2))
     {
         shape_rep_relationship.entry(r1).or_default().push(r2);
     }
@@ -131,8 +137,7 @@ pub fn triangulate(s: &StepFile) -> (Mesh, Stats) {
                 match &s[*m] {
                     Entity::ManifoldSolidBrep(_)
                     | Entity::BrepWithVoids(_)
-                    | Entity::ShellBasedSurfaceModel(_) =>
-                        to_mesh.entry(*m).or_default().push(mat),
+                    | Entity::ShellBasedSurfaceModel(_) => to_mesh.entry(*m).or_default().push(mat),
                     Entity::Axis2Placement3d(_) => (),
                     e => warn!("Skipping {:?}", e),
                 }
@@ -144,97 +149,106 @@ pub fn triangulate(s: &StepFile) -> (Mesh, Stats) {
     if to_mesh.is_empty() {
         s.0.iter()
             .enumerate()
-            .filter(|(_i, e)|
-                match e {
-                    Entity::ManifoldSolidBrep(_)
-                    | Entity::BrepWithVoids(_)
-                    | Entity::ShellBasedSurfaceModel(_) => true,
-                    _ => false,
-                }
-            )
+            .filter(|(_i, e)| match e {
+                Entity::ManifoldSolidBrep(_)
+                | Entity::BrepWithVoids(_)
+                | Entity::ShellBasedSurfaceModel(_) => true,
+                _ => false,
+            })
             .map(|(i, _e)| Id::new(i))
             .for_each(|i| to_mesh.entry(i).or_default().push(DMat4::identity()));
     }
 
     let (to_mesh_iter, empty) = {
         #[cfg(feature = "rayon")]
-        { (to_mesh.par_iter(), || (Mesh::default(), Stats::default())) }
+        {
+            (to_mesh.par_iter(), || (Mesh::default(), Stats::default()))
+        }
         #[cfg(not(feature = "rayon"))]
-        { (to_mesh.iter(), (Mesh::default(), Stats::default())) }
+        {
+            (to_mesh.iter(), (Mesh::default(), Stats::default()))
+        }
     };
-    let mesh_fold = to_mesh_iter
-        .fold(
-            // Empty constructor
-            empty,
-
-            // Fold operation
-            |(mut mesh, mut stats), (id, mats)| {
-                let v_start = mesh.verts.len();
-                let t_start = mesh.triangles.len();
-                match &s[*id] {
-                    Entity::ManifoldSolidBrep(b) =>
-                        closed_shell(s, b.outer, &mut mesh, &mut stats),
-                    Entity::ShellBasedSurfaceModel(b) =>
-                        for v in &b.sbsm_boundary {
-                            shell(s, *v, &mut mesh, &mut stats);
-                        },
-                    Entity::BrepWithVoids(b) =>
-                        // TODO: handle voids
-                        closed_shell(s, b.outer, &mut mesh, &mut stats),
-                    _ => {
-                        warn!("Skipping {:?} (not a known solid)", s[*id]);
-                        return (mesh, stats);
-                    },
-                };
-
-                // Pick out a color from the color map and apply it to each
-                // newly-created vertex
-                let color = brep_colors.get(id)
-                    .map(|c| *c)
-                    .unwrap_or(DVec3::new(0.5, 0.5, 0.5));
-
-                // Build copies of the mesh by copying and applying transforms
-                let v_end = mesh.verts.len();
-                let t_end = mesh.triangles.len();
-                for mat in &mats[1..] {
-                    for v in v_start..v_end {
-                        let p = mesh.verts[v].pos;
-                        let p_h = DVec4::new(p.x, p.y, p.z, 1.0);
-                        let pos = (mat * p_h).xyz();
-
-                        let n = mesh.verts[v].norm;
-                        let norm = (mat * glm::vec3_to_vec4(&n)).xyz();
-
-                        mesh.verts.push(mesh::Vertex { pos, norm, color });
-                    }
-                    let offset = mesh.verts.len() - v_end;
-                    for t in t_start..t_end {
-                        let mut tri = mesh.triangles[t];
-                        tri.verts.add_scalar_mut(offset as u32);
-                        mesh.triangles.push(tri);
+    let mesh_fold = to_mesh_iter.fold(
+        // Empty constructor
+        empty,
+        // Fold operation
+        |(mut mesh, mut stats), (id, mats)| {
+            let v_start = mesh.verts.len();
+            let t_start = mesh.triangles.len();
+            match &s[*id] {
+                Entity::ManifoldSolidBrep(b) => closed_shell(s, b.outer, &mut mesh, &mut stats),
+                Entity::ShellBasedSurfaceModel(b) => {
+                    for v in &b.sbsm_boundary {
+                        shell(s, *v, &mut mesh, &mut stats);
                     }
                 }
+                Entity::BrepWithVoids(b) =>
+                // TODO: handle voids
+                {
+                    closed_shell(s, b.outer, &mut mesh, &mut stats)
+                }
+                _ => {
+                    warn!("Skipping {:?} (not a known solid)", s[*id]);
+                    return (mesh, stats);
+                }
+            };
 
-                // Now that we've built all of the other copies of the mesh,
-                // re-use the original mesh and apply the first transform
-                let mat = mats[0];
+            // Pick out a color from the color map and apply it to each
+            // newly-created vertex
+            //TODO: Make colours optional
+            let color = brep_colors
+                .get(id)
+                .copied()
+                .unwrap_or(DVec3::new(0.5, 0.5, 0.5));
+
+            // Build copies of the mesh by copying and applying transforms
+            //TODO: work out how not to clone.
+            let v_end = mesh.verts.len();
+            let t_end = mesh.triangles.len();
+            for mat in &mats[1..] {
                 for v in v_start..v_end {
                     let p = mesh.verts[v].pos;
                     let p_h = DVec4::new(p.x, p.y, p.z, 1.0);
-                    mesh.verts[v].pos = (mat * p_h).xyz();
+                    let pos = (mat * p_h).xyz();
 
                     let n = mesh.verts[v].norm;
-                    mesh.verts[v].norm = (mat * glm::vec3_to_vec4(&n)).xyz();
+                    let norm = (mat * glm::vec3_to_vec4(&n)).xyz();
 
-                    mesh.verts[v].color = color;
+                    mesh.verts.push(mesh::Vertex { pos, norm, color });
                 }
-                (mesh, stats)
-            });
+                let offset = mesh.verts.len() - v_end;
+                for t in t_start..t_end {
+                    let mut tri = mesh.triangles[t];
+                    tri.verts.add_scalar_mut(offset as u32);
+                    mesh.triangles.push(tri);
+                }
+            }
+
+            // Now that we've built all of the other copies of the mesh,
+            // re-use the original mesh and apply the first transform
+            let mat = mats[0];
+            for v in v_start..v_end {
+                let p = mesh.verts[v].pos;
+                let p_h = DVec4::new(p.x, p.y, p.z, 1.0);
+                mesh.verts[v].pos = (mat * p_h).xyz();
+
+                let n = mesh.verts[v].norm;
+                mesh.verts[v].norm = (mat * glm::vec3_to_vec4(&n)).xyz();
+
+                mesh.verts[v].color = color;
+            }
+            (mesh, stats)
+        },
+    );
 
     let (mesh, stats) = {
         #[cfg(feature = "rayon")]
-        { mesh_fold.reduce(empty,
-                |a, b| (Mesh::combine(a.0, b.0), Stats::combine(a.1, b.1))) }
+        {
+            mesh_fold.reduce(empty, |a, b| {
+                (Mesh::combine(a.0, b.0), Stats::combine(a.1, b.1))
+            })
+        }
         #[cfg(not(feature = "rayon"))]
         {
             mesh_fold
@@ -245,63 +259,60 @@ pub fn triangulate(s: &StepFile) -> (Mesh, Stats) {
     info!("num_faces: {}", stats.num_faces);
     info!("num_errors: {}", stats.num_errors);
     info!("num_panics: {}", stats.num_panics);
+
     (mesh, stats)
 }
 
 fn item_defined_transformation(s: &StepFile, t: Id<ItemDefinedTransformation_>) -> DMat4 {
     let i = s.entity(t).expect("Could not get ItemDefinedTransform");
 
-    let (location, axis, ref_direction) = axis2_placement_3d(s,
-        i.transform_item_1.cast());
-    let t1 = Surface::make_affine_transform(axis,
-        ref_direction,
-        axis.cross(&ref_direction),
-        location);
+    let (location, axis, ref_direction) = axis2_placement_3d(s, i.transform_item_1.cast());
+    let t1 =
+        Surface::make_affine_transform(axis, ref_direction, axis.cross(&ref_direction), location);
 
-    let (location, axis, ref_direction) = axis2_placement_3d(s,
-        i.transform_item_2.cast());
-    let t2 = Surface::make_affine_transform(axis,
-        ref_direction,
-        axis.cross(&ref_direction),
-        location);
+    let (location, axis, ref_direction) = axis2_placement_3d(s, i.transform_item_2.cast());
+    let t2 =
+        Surface::make_affine_transform(axis, ref_direction, axis.cross(&ref_direction), location);
 
     t2 * t1.try_inverse().expect("Could not invert transform matrix")
 }
 
-fn presentation_style_color(s: &StepFile, p: PresentationStyleAssignment)
-    -> Option<DVec3>
-{
+fn presentation_style_color(s: &StepFile, p: PresentationStyleAssignment) -> Option<DVec3> {
     // AAAAAHHHHH
     s.entity(p)
         .and_then(|p: &PresentationStyleAssignment_| {
-                let mut surf = p.styles.iter().filter_map(|y| {
-                    // This is an ambiguous parse, so we hard-code the first
-                    // Entity item in the enum
-                    use PresentationStyleSelect::PreDefinedPresentationStyle;
-                    if let PreDefinedPresentationStyle(u) = y {
-                        s.entity(u.cast::<SurfaceStyleUsage_>())
-                    } else {
-                        None
-                    }});
-                let out = surf.next();
-                out
-            })
-        .and_then(|surf: &SurfaceStyleUsage_|
-            s.entity(surf.style.cast::<SurfaceSideStyle_>()))
-        .and_then(|surf: &SurfaceSideStyle_| if surf.styles.len() != 1 {
+            let mut surf = p.styles.iter().filter_map(|y| {
+                // This is an ambiguous parse, so we hard-code the first
+                // Entity item in the enum
+                use PresentationStyleSelect::PreDefinedPresentationStyle;
+                if let PreDefinedPresentationStyle(u) = y {
+                    s.entity(u.cast::<SurfaceStyleUsage_>())
+                } else {
+                    None
+                }
+            });
+
+            surf.next()
+        })
+        .and_then(|surf: &SurfaceStyleUsage_| s.entity(surf.style.cast::<SurfaceSideStyle_>()))
+        .and_then(|surf: &SurfaceSideStyle_| {
+            if surf.styles.len() != 1 {
                 None
             } else {
                 s.entity(surf.styles[0].cast::<SurfaceStyleFillArea_>())
-            })
-        .map(|surf: &SurfaceStyleFillArea_|
-            s.entity(surf.fill_area).expect("Could not get fill_area"))
-        .and_then(|fill: &FillAreaStyle_| if fill.fill_styles.len() != 1 {
+            }
+        })
+        .map(|surf: &SurfaceStyleFillArea_| {
+            s.entity(surf.fill_area).expect("Could not get fill_area")
+        })
+        .and_then(|fill: &FillAreaStyle_| {
+            if fill.fill_styles.len() != 1 {
                 None
             } else {
                 s.entity(fill.fill_styles[0].cast::<FillAreaStyleColour_>())
-            })
-        .and_then(|f: &FillAreaStyleColour_|
-            s.entity(f.fill_colour.cast::<ColourRgb_>()))
+            }
+        })
+        .and_then(|f: &FillAreaStyleColour_| s.entity(f.fill_colour.cast::<ColourRgb_>()))
         .map(|c| DVec3::new(c.red, c.green, c.blue))
 }
 
@@ -312,9 +323,11 @@ fn cartesian_point(s: &StepFile, a: Id<CartesianPoint_>) -> DVec3 {
 
 fn direction(s: &StepFile, a: Direction) -> DVec3 {
     let p = s.entity(a).expect("Could not get cartesian point");
-    DVec3::new(p.direction_ratios[0],
-               p.direction_ratios[1],
-               p.direction_ratios[2])
+    DVec3::new(
+        p.direction_ratios[0],
+        p.direction_ratios[1],
+        p.direction_ratios[2],
+    )
 }
 
 fn axis2_placement_3d(s: &StepFile, t: Id<Axis2Placement3d_>) -> (DVec3, DVec3, DVec3) {
@@ -357,9 +370,12 @@ fn closed_shell(s: &StepFile, c: ClosedShell, mesh: &mut Mesh, stats: &mut Stats
     stats.num_shells += 1;
 }
 
-fn advanced_face(s: &StepFile, f: AdvancedFace, mesh: &mut Mesh,
-                 stats: &mut Stats) -> Result<(), Error>
-{
+fn advanced_face(
+    s: &StepFile,
+    f: AdvancedFace,
+    mesh: &mut Mesh,
+    stats: &mut Stats,
+) -> Result<(), Error> {
     let face = s.entity(f).expect("Could not get AdvancedFace");
     stats.num_faces += 1;
 
@@ -391,7 +407,7 @@ fn advanced_face(s: &StepFile, f: AdvancedFace, mesh: &mut Mesh,
                     norm: DVec3::zeros(),
                     color: DVec3::new(0.0, 0.0, 0.0),
                 });
-            },
+            }
 
             // Default for lists of contour points
             _ => {
@@ -448,15 +464,15 @@ fn advanced_face(s: &StepFile, f: AdvancedFace, mesh: &mut Mesh,
                 Err(cdt::Error::PointOnFixedEdge(p)) if p >= bonus_points => {
                     pts[p] = pts[0];
                     continue;
-                },
+                }
                 Err(e) => {
                     if SAVE_DEBUG_SVGS {
                         let filename = format!("err{}.svg", face.face_geometry.0);
                         t.save_debug_svg(&filename)
                             .expect("Could not save debug SVG");
                     }
-                    break Err(e)
-                },
+                    break Err(e);
+                }
             }
         }
     });
@@ -466,27 +482,30 @@ fn advanced_face(s: &StepFile, f: AdvancedFace, mesh: &mut Mesh,
                 let a = (a + offset) as u32;
                 let b = (b + offset) as u32;
                 let c = (c + offset) as u32;
-                mesh.triangles.push(Triangle { verts:
-                    if face.same_sense {
+                mesh.triangles.push(Triangle {
+                    verts: if face.same_sense {
                         U32Vec3::new(a, b, c)
                     } else {
                         U32Vec3::new(a, c, b)
-                    }
+                    },
                 });
             }
-        },
+        }
         Ok(Err(e)) => {
-            error!("Got error while triangulating {}: {:?}",
-                   face.face_geometry.0, e);
+            error!(
+                "Got error while triangulating {}: {:?}",
+                face.face_geometry.0, e
+            );
             stats.num_errors += 1;
-        },
+        }
         Err(e) => {
-            error!("Got panic while triangulating {}: {:?}",
-                   face.face_geometry.0, e);
+            error!(
+                "Got panic while triangulating {}: {:?}",
+                face.face_geometry.0, e
+            );
             if SAVE_PANIC_SVGS {
                 let filename = format!("panic{}.svg", face.face_geometry.0);
-                cdt::save_debug_panic(&pts, &edges, &filename)
-                    .expect("Could not save debug SVG");
+                cdt::save_debug_panic(&pts, &edges, &filename).expect("Could not save debug SVG");
             }
             stats.num_panics += 1;
         }
@@ -504,115 +523,144 @@ fn get_surface(s: &StepFile, surf: ap214::Surface) -> Result<Surface, Error> {
     match &s[surf] {
         Entity::CylindricalSurface(c) => {
             let (location, axis, ref_direction) = axis2_placement_3d(s, c.position);
-            Ok(Surface::new_cylinder(axis, ref_direction, location, c.radius.0.0.0))
-        },
+            Ok(Surface::new_cylinder(
+                axis,
+                ref_direction,
+                location,
+                c.radius.0.0.0,
+            ))
+        }
         Entity::ToroidalSurface(c) => {
             let (location, axis, _ref_direction) = axis2_placement_3d(s, c.position);
-            Ok(Surface::new_torus(location, axis, c.major_radius.0.0.0, c.minor_radius.0.0.0))
-        },
+            Ok(Surface::new_torus(
+                location,
+                axis,
+                c.major_radius.0.0.0,
+                c.minor_radius.0.0.0,
+            ))
+        }
         Entity::Plane(p) => {
             // We'll ignore axis and ref_direction in favor of building an
             // orthonormal basis later on
             let (location, axis, ref_direction) = axis2_placement_3d(s, p.position);
             Ok(Surface::new_plane(axis, ref_direction, location))
-        },
+        }
         // We treat cones like planes, since that's a valid mapping into 2D
         Entity::ConicalSurface(c) => {
             let (location, axis, ref_direction) = axis2_placement_3d(s, c.position);
-            Ok(Surface::new_cone(axis, ref_direction, location, c.semi_angle.0))
-        },
+            Ok(Surface::new_cone(
+                axis,
+                ref_direction,
+                location,
+                c.semi_angle.0,
+            ))
+        }
         Entity::SphericalSurface(c) => {
             // We'll ignore axis and ref_direction in favor of building an
             // orthonormal basis later on
             let (location, _axis, _ref_direction) = axis2_placement_3d(s, c.position);
             Ok(Surface::new_sphere(location, c.radius.0.0.0))
-        },
-        Entity::BSplineSurfaceWithKnots(b) =>
-        {
+        }
+        Entity::BSplineSurfaceWithKnots(b) => {
             // TODO: make KnotVector::from_multiplicies accept iterators?
             let u_knots: Vec<f64> = b.u_knots.iter().map(|k| k.0).collect();
-            let u_multiplicities: Vec<usize> = b.u_multiplicities.iter()
+            let u_multiplicities: Vec<usize> = b
+                .u_multiplicities
+                .iter()
                 .map(|&k| k.try_into().expect("Got negative multiplicity"))
                 .collect();
             let u_knot_vec = KnotVector::from_multiplicities(
                 b.u_degree.try_into().expect("Got negative degree"),
-                &u_knots, &u_multiplicities);
+                &u_knots,
+                &u_multiplicities,
+            );
 
             let v_knots: Vec<f64> = b.v_knots.iter().map(|k| k.0).collect();
-            let v_multiplicities: Vec<usize> = b.v_multiplicities.iter()
+            let v_multiplicities: Vec<usize> = b
+                .v_multiplicities
+                .iter()
                 .map(|&k| k.try_into().expect("Got negative multiplicity"))
                 .collect();
             let v_knot_vec = KnotVector::from_multiplicities(
                 b.v_degree.try_into().expect("Got negative degree"),
-                &v_knots, &v_multiplicities);
+                &v_knots,
+                &v_multiplicities,
+            );
 
             let control_points_list = control_points_2d(s, &b.control_points_list);
 
             let surf = BSplineSurface::new(
-                b.u_closed.0.unwrap() == false,
-                b.v_closed.0.unwrap() == false,
+                !b.u_closed.0.unwrap(),
+                !b.v_closed.0.unwrap(),
                 u_knot_vec,
                 v_knot_vec,
                 control_points_list,
             );
             Ok(Surface::BSpline(SampledSurface::new(surf)))
-        },
+        }
         Entity::ComplexEntity(v) if v.len() == 2 => {
             let bspline = if let Entity::BSplineSurfaceWithKnots(b) = &v[0] {
                 b
             } else {
                 warn!("Could not get BSplineCurveWithKnots from {:?}", v[0]);
-                return Err(Error::UnknownCurveType)
+                return Err(Error::UnknownCurveType);
             };
             let rational = if let Entity::RationalBSplineSurface(b) = &v[1] {
                 b
             } else {
                 warn!("Could not get RationalBSplineCurve from {:?}", v[1]);
-                return Err(Error::UnknownCurveType)
+                return Err(Error::UnknownCurveType);
             };
 
             // TODO: make KnotVector::from_multiplicies accept iterators?
             let u_knots: Vec<f64> = bspline.u_knots.iter().map(|k| k.0).collect();
-            let u_multiplicities: Vec<usize> = bspline.u_multiplicities.iter()
+            let u_multiplicities: Vec<usize> = bspline
+                .u_multiplicities
+                .iter()
                 .map(|&k| k.try_into().expect("Got negative multiplicity"))
                 .collect();
             let u_knot_vec = KnotVector::from_multiplicities(
                 bspline.u_degree.try_into().expect("Got negative degree"),
-                &u_knots, &u_multiplicities);
+                &u_knots,
+                &u_multiplicities,
+            );
 
             let v_knots: Vec<f64> = bspline.v_knots.iter().map(|k| k.0).collect();
-            let v_multiplicities: Vec<usize> = bspline.v_multiplicities.iter()
+            let v_multiplicities: Vec<usize> = bspline
+                .v_multiplicities
+                .iter()
                 .map(|&k| k.try_into().expect("Got negative multiplicity"))
                 .collect();
             let v_knot_vec = KnotVector::from_multiplicities(
                 bspline.v_degree.try_into().expect("Got negative degree"),
-                &v_knots, &v_multiplicities);
+                &v_knots,
+                &v_multiplicities,
+            );
 
-            let control_points_list = control_points_2d(
-                    s, &bspline.control_points_list)
+            let control_points_list = control_points_2d(s, &bspline.control_points_list)
                 .into_iter()
                 .zip(rational.weights_data.iter())
-                .map(|(ctrl, weight)|
+                .map(|(ctrl, weight)| {
                     ctrl.into_iter()
-                        .zip(weight.into_iter())
+                        .zip(weight)
                         .map(|(p, w)| DVec4::new(p.x * w, p.y * w, p.z * w, *w))
-                        .collect())
+                        .collect()
+                })
                 .collect();
 
             let surf = NURBSSurface::new(
-                bspline.u_closed.0.unwrap() == false,
-                bspline.v_closed.0.unwrap() == false,
+                !bspline.u_closed.0.unwrap(),
+                !bspline.v_closed.0.unwrap(),
                 u_knot_vec,
                 v_knot_vec,
                 control_points_list,
             );
             Ok(Surface::NURBS(SampledSurface::new(surf)))
-
-        },
+        }
         e => {
             warn!("Could not get surface from {:?}", e);
             Err(Error::UnknownSurfaceType)
-        },
+        }
     }
 }
 
@@ -621,9 +669,7 @@ fn control_points_1d(s: &StepFile, row: &Vec<CartesianPoint>) -> Vec<DVec3> {
 }
 
 fn control_points_2d(s: &StepFile, rows: &Vec<Vec<CartesianPoint>>) -> Vec<Vec<DVec3>> {
-    rows.iter()
-        .map(|row| control_points_1d(s, row))
-        .collect()
+    rows.iter().map(|row| control_points_1d(s, row)).collect()
 }
 
 fn face_bound(s: &StepFile, b: FaceBound) -> Result<Vec<DVec3>, Error> {
@@ -639,7 +685,7 @@ fn face_bound(s: &StepFile, b: FaceBound) -> Result<Vec<DVec3>, Error> {
                 d.reverse()
             }
             Ok(d)
-        },
+        }
         Entity::VertexLoop(v) => {
             // This is an "edge loop" with a single vertex, which is
             // used for cones and not really anything else.
@@ -649,9 +695,7 @@ fn face_bound(s: &StepFile, b: FaceBound) -> Result<Vec<DVec3>, Error> {
     }
 }
 
-fn edge_loop(s: &StepFile, edge_list: &[OrientedEdge])
-    -> Result<Vec<DVec3>, Error>
-{
+fn edge_loop(s: &StepFile, edge_list: &[OrientedEdge]) -> Result<Vec<DVec3>, Error> {
     let mut out = Vec::new();
     for (i, e) in edge_list.iter().enumerate() {
         // Remove the last item from the list, since it's the beginning
@@ -680,23 +724,36 @@ fn edge_curve(s: &StepFile, e: EdgeCurve, orientation: bool) -> Result<Vec<DVec3
     Ok(curve.build(u, v))
 }
 
-fn curve(s: &StepFile, edge_curve: &ap214::EdgeCurve_,
-         curve_id: ap214::Curve, orientation: bool) -> Result<Curve, Error>
-{
+fn curve(
+    s: &StepFile,
+    edge_curve: &ap214::EdgeCurve_,
+    curve_id: ap214::Curve,
+    orientation: bool,
+) -> Result<Curve, Error> {
     Ok(match &s[curve_id] {
         Entity::Circle(c) => {
             let (location, axis, ref_direction) = axis2_placement_3d(s, c.position.cast());
-            Curve::new_circle(location, axis, ref_direction, c.radius.0.0.0,
-                              edge_curve.edge_start == edge_curve.edge_end,
-                              edge_curve.same_sense ^ !orientation)
-        },
+            Curve::new_circle(
+                location,
+                axis,
+                ref_direction,
+                c.radius.0.0.0,
+                edge_curve.edge_start == edge_curve.edge_end,
+                edge_curve.same_sense ^ !orientation,
+            )
+        }
         Entity::Ellipse(c) => {
             let (location, axis, ref_direction) = axis2_placement_3d(s, c.position.cast());
-            Curve::new_ellipse(location, axis, ref_direction,
-                               c.semi_axis_1.0.0.0, c.semi_axis_2.0.0.0,
-                               edge_curve.edge_start == edge_curve.edge_end,
-                               edge_curve.same_sense ^ !orientation)
-        },
+            Curve::new_ellipse(
+                location,
+                axis,
+                ref_direction,
+                c.semi_axis_1.0.0.0,
+                c.semi_axis_2.0.0.0,
+                edge_curve.edge_start == edge_curve.edge_end,
+                edge_curve.same_sense ^ !orientation,
+            )
+        }
         Entity::BSplineCurveWithKnots(c) => {
             if c.closed_curve.0 != Some(false) {
                 return Err(Error::ClosedCurve);
@@ -704,78 +761,257 @@ fn curve(s: &StepFile, edge_curve: &ap214::EdgeCurve_,
                 return Err(Error::SelfIntersectingCurve);
             }
 
-            let control_points_list = control_points_1d(
-                s, &c.control_points_list);
+            let control_points_list = control_points_1d(s, &c.control_points_list);
 
             let knots: Vec<f64> = c.knots.iter().map(|k| k.0).collect();
-            let multiplicities: Vec<usize> = c.knot_multiplicities.iter()
+            let multiplicities: Vec<usize> = c
+                .knot_multiplicities
+                .iter()
                 .map(|&k| k.try_into().expect("Got negative multiplicity"))
                 .collect();
             let knot_vec = KnotVector::from_multiplicities(
                 c.degree.try_into().expect("Got negative degree"),
-                &knots, &multiplicities);
-
-            let curve = nurbs::BSplineCurve::new(
-                c.closed_curve.0.unwrap() == false,
-                knot_vec,
-                control_points_list,
+                &knots,
+                &multiplicities,
             );
+
+            let curve =
+                nurbs::BSplineCurve::new(!c.closed_curve.0.unwrap(), knot_vec, control_points_list);
             Curve::BSplineCurveWithKnots(SampledCurve::new(curve))
-        },
+        }
         Entity::ComplexEntity(v) if v.len() == 2 => {
             let bspline = if let Entity::BSplineCurveWithKnots(b) = &v[0] {
                 b
             } else {
                 warn!("Could not get BSplineCurveWithKnots from {:?}", v[0]);
-                return Err(Error::UnknownCurveType)
+                return Err(Error::UnknownCurveType);
             };
             let rational = if let Entity::RationalBSplineCurve(b) = &v[1] {
                 b
             } else {
                 warn!("Could not get RationalBSplineCurve from {:?}", v[1]);
-                return Err(Error::UnknownCurveType)
+                return Err(Error::UnknownCurveType);
             };
             let knots: Vec<f64> = bspline.knots.iter().map(|k| k.0).collect();
-            let multiplicities: Vec<usize> = bspline.knot_multiplicities.iter()
+            let multiplicities: Vec<usize> = bspline
+                .knot_multiplicities
+                .iter()
                 .map(|&k| k.try_into().expect("Got negative multiplicity"))
                 .collect();
             let knot_vec = KnotVector::from_multiplicities(
                 bspline.degree.try_into().expect("Got negative degree"),
-                &knots, &multiplicities);
+                &knots,
+                &multiplicities,
+            );
 
-            let control_points_list = control_points_1d(
-                    s, &bspline.control_points_list)
+            let control_points_list = control_points_1d(s, &bspline.control_points_list)
                 .into_iter()
                 .zip(rational.weights_data.iter())
                 .map(|(p, w)| DVec4::new(p.x * w, p.y * w, p.z * w, *w))
                 .collect();
 
             let curve = nurbs::NURBSCurve::new(
-                bspline.closed_curve.0.unwrap() == false,
+                !bspline.closed_curve.0.unwrap(),
                 knot_vec,
                 control_points_list,
             );
             Curve::NURBSCurve(SampledCurve::new(curve))
-        },
-        Entity::SurfaceCurve(v) => {
-            curve(s, edge_curve, v.curve_3d, orientation)?
-        },
-        Entity::SeamCurve(v) => {
-            curve(s, edge_curve, v.curve_3d, orientation)?
-        },
+        }
+        Entity::SurfaceCurve(v) => curve(s, edge_curve, v.curve_3d, orientation)?,
+        Entity::SeamCurve(v) => curve(s, edge_curve, v.curve_3d, orientation)?,
         // The Line type ignores pnt / dir and just uses u and v
         Entity::Line(_) => Curve::new_line(),
         e => {
             warn!("Could not get edge from {:?}", e);
             return Err(Error::UnknownCurveType);
-        },
+        }
     })
 }
 
 fn vertex_point(s: &StepFile, v: Vertex) -> DVec3 {
-    cartesian_point(s,
+    cartesian_point(
+        s,
         s.entity(v.cast::<VertexPoint_>())
             .expect("Could not get VertexPoint")
             .vertex_geometry
-            .cast())
+            .cast(),
+    )
+}
+
+#[cfg(feature = "rayon")]
+pub fn triangulate2(s: &StepFile) -> (Mesh, Stats) {
+    use nalgebra::{Matrix4, Vector3, Vector4};
+
+    let styled_items: Vec<_> =
+        s.0.iter()
+            .filter_map(MechanicalDesignGeometricPresentationRepresentation_::try_from_entity)
+            .flat_map(|m| m.items.iter())
+            .filter_map(|item| s.entity(item.cast::<StyledItem_>()))
+            .collect();
+
+    let brep_colors: HashMap<_, Vector3<f64>> = styled_items
+        .iter()
+        .filter_map(|styled| {
+            if styled.styles.len() != 1 {
+                None
+            } else {
+                presentation_style_color(s, styled.styles[0]).map(|c| (styled.item, c))
+            }
+        })
+        .collect();
+
+    let mut transform_stack = build_transform_stack(s, false);
+    let mut roots = transform_stack_roots(&transform_stack);
+    if roots.len() > 1 {
+        info!("Flipping transform stack");
+        transform_stack = build_transform_stack(s, true);
+        roots = transform_stack_roots(&transform_stack);
+    }
+    let mut todo: Vec<_> = roots
+        .into_iter()
+        .map(|v| (v, Matrix4::identity()))
+        .collect();
+    if todo.len() > 1 {
+        warn!("Transformation stack has more than one root!");
+    }
+
+    let mut shape_rep_relationship: HashMap<Id<_>, Vec<Id<_>>> = HashMap::new();
+    for (r1, r2) in
+        s.0.iter()
+            .filter_map(ShapeRepresentationRelationship_::try_from_entity)
+            .map(|e| (e.rep_1, e.rep_2))
+    {
+        shape_rep_relationship.entry(r1).or_default().push(r2);
+    }
+
+    let mut to_mesh: HashMap<Id<_>, Vec<_>> = HashMap::new();
+    while let Some((id, mat)) = todo.pop() {
+        for child in shape_rep_relationship.get(&id).unwrap_or(&vec![]) {
+            todo.push((*child, mat));
+        }
+        if let Some(children) = transform_stack.get(&id) {
+            for (child, next_mat) in children {
+                todo.push((*child, mat * next_mat));
+            }
+        } else {
+            let items = match &s[id] {
+                Entity::AdvancedBrepShapeRepresentation(b) => &b.items,
+                Entity::ShapeRepresentation(b) => &b.items,
+                Entity::ManifoldSurfaceShapeRepresentation(b) => &b.items,
+                e => panic!("Could not get shape from {:?}", e),
+            };
+
+            for m in items.iter() {
+                match &s[*m] {
+                    Entity::ManifoldSolidBrep(_)
+                    | Entity::BrepWithVoids(_)
+                    | Entity::ShellBasedSurfaceModel(_) => to_mesh.entry(*m).or_default().push(mat),
+                    Entity::Axis2Placement3d(_) => (),
+                    e => warn!("Skipping {:?}", e),
+                }
+            }
+        }
+    }
+    if to_mesh.is_empty() {
+        s.0.iter()
+            .enumerate()
+            .filter(|(_i, e)| match e {
+                Entity::ManifoldSolidBrep(_)
+                | Entity::BrepWithVoids(_)
+                | Entity::ShellBasedSurfaceModel(_) => true,
+                _ => false,
+            })
+            .map(|(i, _e)| Id::new(i))
+            .for_each(|i| to_mesh.entry(i).or_default().push(Matrix4::identity()));
+    }
+
+    let (mesh, stats) = to_mesh
+        .into_par_iter()
+        .map(|(id, mats)| {
+            let mut local_mesh = Mesh::default();
+            let mut local_stats = Stats::default();
+
+            let color = brep_colors
+                .get(&id)
+                .copied()
+                .unwrap_or(Vector3::new(0.5, 0.5, 0.5));
+
+            let mut template_mesh = Mesh::default();
+            match &s[id] {
+                Entity::ManifoldSolidBrep(b) => {
+                    closed_shell(s, b.outer, &mut template_mesh, &mut local_stats);
+                }
+                Entity::ShellBasedSurfaceModel(b) => {
+                    for v in &b.sbsm_boundary {
+                        shell(s, *v, &mut template_mesh, &mut local_stats);
+                    }
+                }
+                Entity::BrepWithVoids(b) => {
+                    closed_shell(s, b.outer, &mut template_mesh, &mut local_stats);
+
+                    for void_shell_id in &b.voids {
+                        let oriented_shell = s.entity(*void_shell_id).unwrap();
+                        let mut void_mesh = Mesh::default();
+                        closed_shell(
+                            s,
+                            oriented_shell.closed_shell_element,
+                            &mut void_mesh,
+                            &mut local_stats,
+                        );
+
+                        if !oriented_shell.orientation {
+                            for tri in void_mesh.triangles.iter_mut() {
+                                tri.verts.swap_rows(1, 2);
+                            }
+                        }
+                        template_mesh = Mesh::combine(template_mesh, void_mesh);
+                    }
+                }
+                _ => {
+                    warn!("Skipping {:?} (not a known solid)", s[id]);
+                    return (local_mesh, local_stats);
+                }
+            };
+
+            for mat in mats {
+                let v_offset = local_mesh
+                    .verts
+                    .len()
+                    .try_into()
+                    .expect("too many triangles");
+
+                for v in &template_mesh.verts {
+                    let p_h = Vector4::new(v.pos.x, v.pos.y, v.pos.z, 1.0);
+                    let pos = (mat * p_h).xyz();
+
+                    let n_h = Vector4::new(v.norm.x, v.norm.y, v.norm.z, 0.0);
+                    let norm = (mat * n_h).xyz().normalize();
+
+                    local_mesh.verts.push(mesh::Vertex { pos, norm, color });
+                }
+
+                for t in &template_mesh.triangles {
+                    let mut new_tri = *t;
+                    new_tri.verts.add_scalar_mut(v_offset);
+                    local_mesh.triangles.push(new_tri);
+                }
+            }
+            (local_mesh, local_stats)
+        })
+        .reduce(
+            || (Mesh::default(), Stats::default()),
+            |(mesh_a, stats_a), (mesh_b, stats_b)| {
+                (
+                    Mesh::combine(mesh_a, mesh_b),
+                    Stats::combine(stats_a, stats_b),
+                )
+            },
+        );
+
+    info!("num_shells: {}", stats.num_shells);
+    info!("num_faces: {}", stats.num_faces);
+    info!("num_errors: {}", stats.num_errors);
+    info!("num_panics: {}", stats.num_panics);
+
+    (mesh, stats)
 }

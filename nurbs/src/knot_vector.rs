@@ -18,8 +18,10 @@ impl KnotVector {
     /// Constructs a new knot vector of over
     pub fn from_multiplicities(p: usize, knots: &[f64], multiplicities: &[usize]) -> Self {
         assert!(knots.len() == multiplicities.len());
-        let U = knots.iter().zip(multiplicities.iter())
-            .flat_map(|(k, m)| std::iter::repeat(*k).take(*m))
+        let U = knots
+            .iter()
+            .zip(multiplicities.iter())
+            .flat_map(|(k, m)| std::iter::repeat_n(*k, *m))
             .collect();
         Self { U, p }
     }
@@ -135,9 +137,7 @@ impl KnotVector {
             let mut s2 = 1;
             a[0][0] = 1.0;
             for k in 1..=n {
-                let aus = |i: i32| -> usize {
-                    i.try_into().expect("Could not convert to usize")
-                };
+                let aus = |i: i32| -> usize { i.try_into().expect("Could not convert to usize") };
                 let mut d = 0.0;
                 let rk = (r as i32) - (k as i32);
                 let pk = (self.p as i32) - (k as i32);
@@ -146,7 +146,7 @@ impl KnotVector {
                     d = a[s2][0] * ndu[aus(rk)][aus(pk)];
                 }
                 let j1 = aus(if rk >= -1 { 1 } else { -rk });
-                let j2 = aus(if r as i32 - 1 <= pk as i32 {
+                let j2 = aus(if r as i32 - 1 <= pk {
                     k as i32 - 1
                 } else {
                     self.p as i32 - r as i32
@@ -187,7 +187,7 @@ impl std::ops::Index<usize> for KnotVector {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    
     /*
     #[test]
     fn test_find_span() {

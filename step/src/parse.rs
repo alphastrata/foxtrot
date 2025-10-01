@@ -1,17 +1,20 @@
-use std::collections::{HashSet, HashMap};
+use arrayvec::ArrayVec;
+use memchr::{memchr, memchr3};
 use nom::{
-    branch::{alt},
+    branch::alt,
     bytes::complete::{is_not, tag},
     character::complete::{char, digit1},
     combinator::{map, map_res, opt},
     error::*,
+    multi::separated_list0,
     sequence::{delimited, preceded, tuple},
-    multi::{separated_list0},
 };
-use memchr::{memchr, memchr3};
-use arrayvec::ArrayVec;
+use std::collections::{HashMap, HashSet};
 
-use crate::{id::{Id, HasId}, ap214::{Entity, superclasses_of}};
+use crate::{
+    ap214::{Entity, superclasses_of},
+    id::{HasId, Id},
+};
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -31,17 +34,20 @@ pub fn nom_alt_err<'a, U>(s: &'a str) -> IResult<'a, U> {
 pub struct Logical(pub Option<bool>);
 
 impl HasId for Logical {
-    fn append_ids(&self, _v: &mut Vec<usize>) { /* Nothing to do here */ }
+    fn append_ids(&self, _v: &mut Vec<usize>) { /* Nothing to do here */
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
 pub(crate) trait Parse<'a> {
-    fn parse(s: &'a str) -> IResult<'a, Self> where Self: Sized;
+    fn parse(s: &'a str) -> IResult<'a, Self>
+    where
+        Self: Sized;
 }
 
 impl Parse<'_> for f64 {
-    fn parse(s: &str) -> IResult<Self> {
+    fn parse(s: &str) -> IResult<'_, Self> {
         match fast_float::parse_partial::<f64, _>(s) {
             Err(_) => nom_err(s, ErrorKind::Float),
             Ok((x, n)) => Ok((&s[n..], x)),
@@ -50,25 +56,25 @@ impl Parse<'_> for f64 {
 }
 
 impl Parse<'_> for i64 {
-    fn parse(s: &str) -> IResult<Self> {
-        map_res(tuple((opt(char('-')), digit1)),
+    fn parse(s: &str) -> IResult<'_, Self> {
+        map_res(
+            tuple((opt(char('-')), digit1)),
             |(sign, digits)| -> Result<i64, <i64 as std::str::FromStr>::Err> {
                 let num = str::parse::<i64>(digits)?;
-                if sign.is_some() {
-                    Ok(-num)
-                } else {
-                    Ok(num)
-                }
-            })(s)
+                if sign.is_some() { Ok(-num) } else { Ok(num) }
+            },
+        )(s)
     }
 }
 impl<'a> Parse<'a> for &'a str {
     fn parse(s: &'a str) -> IResult<'a, &'a str> {
         alt((
-            map(delimited(char('\''), opt(is_not("'")), char('\'')),
-                |r| r.unwrap_or("")),
+            map(delimited(char('\''), opt(is_not("'")), char('\'')), |r| {
+                r.unwrap_or("")
+            }),
             // NUL REF
-            map(char('$'), |_| "")))(s)
+            map(char('$'), |_| ""),
+        ))(s)
     }
 }
 
@@ -108,9 +114,7 @@ impl<'a, T: Parse<'a>, const CAP: usize> Parse<'a> for ArrayVec<T, CAP> {
 }
 impl<'a, T: Parse<'a>> Parse<'a> for Option<T> {
     fn parse(s: &'a str) -> IResult<'a, Self> {
-        alt((
-            map(char('$'), |_| None),
-            map(T::parse, |v| Some(v))))(s)
+        alt((map(char('$'), |_| None), map(T::parse, |v| Some(v))))(s)
     }
 }
 impl<'a> Parse<'a> for Logical {
@@ -124,28 +128,27 @@ impl<'a> Parse<'a> for Logical {
 }
 impl<'a> Parse<'a> for bool {
     fn parse(s: &'a str) -> IResult<'a, Self> {
-        alt((
-            map(tag(".T."), |_| true),
-            map(tag(".F."), |_| false),
-        ))(s)
+        alt((map(tag(".T."), |_| true), map(tag(".F."), |_| false)))(s)
     }
 }
 impl<'a, T> Parse<'a> for Id<T> {
-    fn parse(s: &str) -> IResult<Self> {
+    fn parse(s: &str) -> IResult<'_, Self> {
         alt((
-            map_res(
-                preceded(char('#'), digit1),
-                |s: &str| s.parse().map(|i| Id::new(i))),
+            map_res(preceded(char('#'), digit1), |s: &str| {
+                s.parse().map(|i| Id::new(i))
+            }),
             // NUL id deserializes to 0
-            map(char('$'), |_| Id::empty())))
-            (s)
+            map(char('$'), |_| Id::empty()),
+        ))(s)
     }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
 pub(crate) trait ParseFromChunks<'a> {
-    fn parse_chunks(s: &[&'a str]) -> IResult<'a, Self> where Self: Sized;
+    fn parse_chunks(s: &[&'a str]) -> IResult<'a, Self>
+    where
+        Self: Sized;
 }
 
 impl<'a, T: ParseFromChunks<'a>> Parse<'a> for T {
@@ -158,7 +161,7 @@ impl<'a, T: ParseFromChunks<'a>> Parse<'a> for T {
 // optionally followed by a comma
 pub struct Derived;
 impl<'a> Parse<'a> for Derived {
-    fn parse(s: &str) -> IResult<Self> {
+    fn parse(s: &str) -> IResult<'_, Self> {
         map(char('*'), |_| Derived)(s)
     }
 }
@@ -180,37 +183,42 @@ fn check_str<'a>(s: &'a str, i: &mut usize, strs: &[&'a str]) -> &'a str {
     }
 }
 pub(crate) fn param_from_chunks<'a, T: Parse<'a>>(
-    last: bool, s: &'a str,
-    i: &mut usize, strs: &[&'a str]) -> IResult<'a, T>
-{
+    last: bool,
+    s: &'a str,
+    i: &mut usize,
+    strs: &[&'a str],
+) -> IResult<'a, T> {
     let s = check_str(s, i, strs);
     let (s, out) = T::parse(s)?;
     let s = check_str(s, i, strs);
-    let (s, _) = char(if last { ')'} else { ',' })(s)?;
+    let (s, _) = char(if last { ')' } else { ',' })(s)?;
     Ok((check_str(s, i, strs), out))
 }
 
-pub(crate) fn parse_enum_tag(s: &str) -> IResult<&str> {
-    delimited(char('.'),
-              nom::bytes::complete::take_while(
-                  |c: char| c == '_' ||
-                            c.is_ascii_uppercase() ||
-                            c.is_ascii_digit()),
-              char('.'))(s)
+pub(crate) fn parse_enum_tag(s: &str) -> IResult<'_, &str> {
+    delimited(
+        char('.'),
+        nom::bytes::complete::take_while(|c: char| {
+            c == '_' || c.is_ascii_uppercase() || c.is_ascii_digit()
+        }),
+        char('.'),
+    )(s)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-pub(crate) fn parse_entity_decl(s: &[u8]) -> IResult<(usize, Entity)> {
+pub(crate) fn parse_entity_decl(s: &[u8]) -> IResult<'_, (usize, Entity<'_>)> {
     let s = match std::str::from_utf8(s) {
         Ok(s) => s,
         Err(_) => return nom_err("", ErrorKind::Escaped), // TODO correct code?
     };
-    map(tuple((Id::<()>::parse, char('='), Entity::parse)),
-        |(i, _, e)| (i.0, e))(s)
+    map(
+        tuple((Id::<()>::parse, char('='), Entity::parse)),
+        |(i, _, e)| (i.0, e),
+    )(s)
 }
 
-pub(crate) fn parse_entity_fallback(s: &[u8]) -> IResult<(usize, Entity)> {
+pub(crate) fn parse_entity_fallback(s: &[u8]) -> IResult<'_, (usize, Entity<'_>)> {
     let s = match std::str::from_utf8(s) {
         Ok(s) => s,
         Err(_) => return nom_err("", ErrorKind::Escaped),
@@ -218,7 +226,7 @@ pub(crate) fn parse_entity_fallback(s: &[u8]) -> IResult<(usize, Entity)> {
     map(Id::<()>::parse, |i| (i.0, Entity::_FailedToParse))(s)
 }
 
-pub(crate) fn parse_complex_mapping(s: &str) -> IResult<Entity> {
+pub(crate) fn parse_complex_mapping(s: &str) -> IResult<'_, Entity<'_>> {
     // We'll maintain a map from sub-entity name to its argument string, then
     // use this map to figure out the tree and construct it.
     let mut subentities: HashMap<&str, &str> = HashMap::new();
@@ -240,8 +248,7 @@ pub(crate) fn parse_complex_mapping(s: &str) -> IResult<Entity> {
             b'(' => {
                 if depth == 1 {
                     let name_slice = &bstr[index..(index + next)];
-                    name = std::str::from_utf8(name_slice)
-                        .expect("Could not convert back to name");
+                    name = std::str::from_utf8(name_slice).expect("Could not convert back to name");
                     args_start = index + next + 1;
                     let name_tag_slice = &bstr[index..(index + next + 1)];
                     let name_tag = std::str::from_utf8(name_tag_slice)
@@ -249,18 +256,17 @@ pub(crate) fn parse_complex_mapping(s: &str) -> IResult<Entity> {
                     name_tags.insert(name, name_tag);
                 }
                 depth += 1;
-            },
+            }
             b')' => {
                 depth -= 1;
                 if depth == 1 {
                     let arg_slice = &bstr[args_start..(index + next)];
-                    let args = std::str::from_utf8(arg_slice)
-                        .expect("Could not convert args");
+                    let args = std::str::from_utf8(arg_slice).expect("Could not convert args");
                     subentities.insert(name, args);
                 } else if depth == 0 {
                     break;
                 }
-            },
+            }
             b'\'' => {
                 // TODO: handle escaped quotes
                 let j = match memchr(b'\'', &bstr[(index + next + 1)..]) {
@@ -275,9 +281,7 @@ pub(crate) fn parse_complex_mapping(s: &str) -> IResult<Entity> {
     }
     // Filter out the list of subclasses to those which aren't a parent of
     // another item in the set; these are our potential leafs.
-    let mut potential_leafs: HashSet<&str> = subentities.keys()
-        .map(|i| *i)
-        .collect();
+    let mut potential_leafs: HashSet<&str> = subentities.keys().copied().collect();
     for k in subentities.keys() {
         for sup in superclasses_of(k) {
             potential_leafs.remove(sup);
@@ -285,7 +289,7 @@ pub(crate) fn parse_complex_mapping(s: &str) -> IResult<Entity> {
     }
     // Eliminate any leaf with no arguments, since they're just addding
     // bonus constraints (which we don't handle anyways)
-    potential_leafs.retain(|k| subentities[k] != "");
+    potential_leafs.retain(|k| !subentities[k].is_empty());
 
     // Sort potential leafs so that ComplexEntity is deterministic and we can
     // match against it later
@@ -310,7 +314,7 @@ pub(crate) fn parse_complex_mapping(s: &str) -> IResult<Entity> {
         for c in chain.iter().rev() {
             if !subentities[c].is_empty() {
                 new_decl.push(subentities[c]);
-                new_decl.push(if *c == leaf { &")" } else { &"," });
+                new_decl.push(if *c == leaf { ")" } else { "," });
             }
         }
         leaf_entities.push(Entity::parse_chunks(&new_decl)?.1)
