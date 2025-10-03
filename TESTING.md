@@ -35,3 +35,8 @@ ______________________________________________________________________
     ______________________________________________________________________
 
 3. Or, you could download them file-by-file.
+
+
+---
+
+> NOTE: That particular also contains a bunch of `.seg` files, which are not going to be useful to you in _this_ repo, so to clean them up: `cd ./step_examples; rm *.seg`
