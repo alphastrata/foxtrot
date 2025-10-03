@@ -13,9 +13,14 @@ nalgebra-glm = { workspace = true }
 nalgebra = { workspace = true, optional = true }
 thiserror = { workspace = true }
 rayon = { workspace = true, optional = true }
+wgpu = { workspace = true, optional = true }
+pollster = { workspace = true, optional = true }
+bytemuck = { workspace = true, optional = true }
+
 
 [features]
 parallel = ["rayon", "step/parallel", "dep:nalgebra"]
+wgpu = ["dep:wgpu", "dep:pollster", "dep:bytemuck", "parallel"]
 
 [dev-dependencies]
 clap = { workspace = true }
@@ -26,4 +31,4 @@ env_logger = { workspace = true }
 [[bench]]
 name = 'triangulation_benchmark'
 harness = false
-required-features = ["parallel"]
+required-features = ["parallel", "wgpu"]

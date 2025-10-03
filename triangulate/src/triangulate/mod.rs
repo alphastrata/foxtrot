@@ -8,6 +8,10 @@ use nalgebra_glm as glm;
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
 
+pub mod fucking_pythagoras;
+#[cfg(feature = "wgpu")]
+pub mod wgpu_impl;
+
 use crate::{
     Error,
     curve::Curve,
@@ -27,6 +31,12 @@ use step::{
 
 const SAVE_DEBUG_SVGS: bool = false;
 const SAVE_PANIC_SVGS: bool = false;
+pub(crate) struct FaceTask<'a> {
+    face_id: AdvancedFace<'a>,
+    transforms: Vec<DMat4>,
+    color: DVec3,
+    flip_normal: bool,
+}
 
 /// `TransformStack` is a mapping of representations to transformed children.
 type TransformStack<'a> = HashMap<Representation<'a>, Vec<(Representation<'a>, DMat4)>>;
@@ -1146,9 +1156,10 @@ pub fn triangulate3(s: &StepFile) -> (Mesh, Stats) {
 
                 for void_id in &b.voids {
                     if let Some(oriented) = s.entity(*void_id)
-                        && let Some(cs) = s.entity(oriented.closed_shell_element) {
-                            faces.extend(cs.cfs_faces.iter().map(|f: &Face| f.cast()));
-                        } //TODO: Verbose logging on failures behind compile flag
+                        && let Some(cs) = s.entity(oriented.closed_shell_element)
+                    {
+                        faces.extend(cs.cfs_faces.iter().map(|f: &Face| f.cast()));
+                    } //TODO: Verbose logging on failures behind compile flag
                 }
                 faces
             }
@@ -1641,4 +1652,9 @@ fn triangulate_single_face(
     Ok(())
 }
 
-pub mod fucking_pythagoras;
+#[cfg(feature = "wgpu")]
+pub fn wgpu_triangulate(s: &StepFile) -> (Mesh, Stats) {
+    // For stability, use the proven CPU implementation
+    // GPU implementation is not complete and causes crashes
+    crate::triangulate::fucking_pythagoras::triangulate6(s)
+}
