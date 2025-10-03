@@ -19,4 +19,11 @@ parallel = ["rayon", "step/parallel", "dep:nalgebra"]
 
 [dev-dependencies]
 clap = { workspace = true }
+criterion = { workspace = true, features = ["html_reports"] }
 env_logger = { workspace = true }
+
+
+[[bench]]
+name = 'triangulation_benchmark'
+harness = false
+required-features = ["parallel"]

@@ -27,6 +27,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let transparent = args.transparent;
     let decimation_ratio = args.decimation_ratio;
     let decimation_error = args.decimation_error;
+
     #[cfg(feature = "occt")]
     let occt_linear_deflection = args.occt_linear_deflection;
     #[cfg(feature = "occt")]
@@ -37,7 +38,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let loader = std::thread::spawn(move || {
         let foxtrot_pipeline_start = std::time::Instant::now();
         use step::step_file::StepFile;
-        use triangulate::triangulate::triangulate;
+        use triangulate::triangulate::triangulate4 as triangulate;
 
         let data = std::fs::read(&input).expect("Could not open file");
         let flat = StepFile::strip_flatten(&data);

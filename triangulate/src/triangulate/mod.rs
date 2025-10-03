@@ -1015,3 +1015,630 @@ pub fn triangulate2(s: &StepFile) -> (Mesh, Stats) {
 
     (mesh, stats)
 }
+
+#[cfg(feature = "rayon")]
+pub fn triangulate3(s: &StepFile) -> (Mesh, Stats) {
+    use nalgebra::{Matrix4, Vector3, Vector4};
+    use rayon::prelude::*;
+
+    // Phase 1: Same setup as triangulate2
+    let styled_items: Vec<_> =
+        s.0.iter()
+            .filter_map(MechanicalDesignGeometricPresentationRepresentation_::try_from_entity)
+            .flat_map(|m| m.items.iter())
+            .filter_map(|item| s.entity(item.cast::<StyledItem_>()))
+            .collect();
+
+    let brep_colors: HashMap<_, Vector3<f64>> = styled_items
+        .iter()
+        .filter_map(|styled| {
+            if styled.styles.len() != 1 {
+                None
+            } else {
+                presentation_style_color(s, styled.styles[0]).map(|c| (styled.item, c))
+            }
+        })
+        .collect();
+
+    let mut transform_stack = build_transform_stack(s, false);
+    let mut roots = transform_stack_roots(&transform_stack);
+    if roots.len() > 1 {
+        info!("Flipping transform stack");
+        transform_stack = build_transform_stack(s, true);
+        roots = transform_stack_roots(&transform_stack);
+    }
+
+    let mut todo: Vec<_> = roots
+        .into_iter()
+        .map(|v| (v, Matrix4::identity()))
+        .collect();
+    if todo.len() > 1 {
+        warn!("Transformation stack has more than one root!");
+    }
+
+    let mut shape_rep_relationship: HashMap<Id<_>, Vec<Id<_>>> = HashMap::new();
+    for (r1, r2) in
+        s.0.iter()
+            .filter_map(ShapeRepresentationRelationship_::try_from_entity)
+            .map(|e| (e.rep_1, e.rep_2))
+    {
+        shape_rep_relationship.entry(r1).or_default().push(r2);
+    }
+
+    let mut to_mesh: HashMap<Id<_>, Vec<_>> = HashMap::new();
+    while let Some((id, mat)) = todo.pop() {
+        for child in shape_rep_relationship.get(&id).unwrap_or(&vec![]) {
+            todo.push((*child, mat));
+        }
+        if let Some(children) = transform_stack.get(&id) {
+            for (child, next_mat) in children {
+                todo.push((*child, mat * next_mat));
+            }
+        } else {
+            let items = match &s[id] {
+                Entity::AdvancedBrepShapeRepresentation(b) => &b.items,
+                Entity::ShapeRepresentation(b) => &b.items,
+                Entity::ManifoldSurfaceShapeRepresentation(b) => &b.items,
+                e => panic!("Could not get shape from {:?}", e),
+            };
+
+            for m in items.iter() {
+                match &s[*m] {
+                    Entity::ManifoldSolidBrep(_)
+                    | Entity::BrepWithVoids(_)
+                    | Entity::ShellBasedSurfaceModel(_) => to_mesh.entry(*m).or_default().push(mat),
+                    Entity::Axis2Placement3d(_) => (),
+                    e => warn!("Skipping {:?}", e),
+                }
+            }
+        }
+    }
+
+    if to_mesh.is_empty() {
+        s.0.iter()
+            .enumerate()
+            .filter(|(_i, e)| {
+                matches!(
+                    e,
+                    Entity::ManifoldSolidBrep(_)
+                        | Entity::BrepWithVoids(_)
+                        | Entity::ShellBasedSurfaceModel(_)
+                )
+            })
+            .map(|(i, _e)| Id::new(i))
+            .for_each(|i| to_mesh.entry(i).or_default().push(Matrix4::identity()));
+    }
+
+    // Phase 2: Collect all faces with their context
+    #[derive(Clone)]
+    struct FaceJob<'a> {
+        face_id: AdvancedFace<'a>,
+        transforms: Vec<Matrix4<f64>>,
+        color: Vector3<f64>,
+    }
+
+    let mut face_jobs = Vec::new();
+    for (brep_id, mats) in to_mesh {
+        let color = brep_colors
+            .get(&brep_id)
+            .copied()
+            .unwrap_or(Vector3::new(0.5, 0.5, 0.5)); //TODO: option to ignore colours? //TODO: const
+
+        let faces: Vec<AdvancedFace> = match &s[brep_id] {
+            Entity::ManifoldSolidBrep(b) => s
+                .entity(b.outer)
+                .map(|cs: &ClosedShell_| cs.cfs_faces.iter().map(|f| f.cast()).collect())
+                .unwrap_or_default(),
+            Entity::ShellBasedSurfaceModel(b) => b
+                .sbsm_boundary
+                .iter()
+                .flat_map(|shell| match &s[*shell] {
+                    Entity::ClosedShell(cs) => cs.cfs_faces.iter().map(|f| f.cast()).collect(),
+                    Entity::OpenShell(os) => os.cfs_faces.iter().map(|f| f.cast()).collect(),
+                    _ => vec![],
+                })
+                .collect(),
+            Entity::BrepWithVoids(b) => {
+                let mut faces: Vec<Id<AdvancedFace_>> = s
+                    .entity(b.outer)
+                    .map(|cs: &ClosedShell_| cs.cfs_faces.iter().map(|f| f.cast()).collect())
+                    .unwrap_or_default();
+
+                for void_id in &b.voids {
+                    if let Some(oriented) = s.entity(*void_id)
+                        && let Some(cs) = s.entity(oriented.closed_shell_element) {
+                            faces.extend(cs.cfs_faces.iter().map(|f: &Face| f.cast()));
+                        } //TODO: Verbose logging on failures behind compile flag
+                }
+                faces
+            }
+            _ => vec![],
+        };
+
+        for face_id in faces {
+            face_jobs.push(FaceJob {
+                face_id,
+                transforms: mats.clone(),
+                color,
+            });
+        }
+    }
+
+    // Phase 3: Parallel face triangulation
+    let (mesh, stats) = face_jobs
+        .par_iter()
+        .map(|job| {
+            let mut local_stats = Stats::default();
+            let mut face_verts = Vec::new();
+            let mut face_triangles = Vec::new();
+
+            // Triangulate once
+            if let Err(err) = advanced_face_to_mesh(
+                s,
+                job.face_id,
+                &mut face_verts,
+                &mut face_triangles,
+                &mut local_stats,
+            ) {
+                error!("Failed to triangulate face: {}", err);
+                return (Mesh::default(), local_stats);
+            }
+
+            // Apply transforms and replicate
+            let mut mesh = Mesh::default();
+            for mat in &job.transforms {
+                let v_offset: u32 = mesh.verts.len().try_into().expect("too many vertices");
+
+                for v in &face_verts {
+                    let p_h = Vector4::new(v.pos.x, v.pos.y, v.pos.z, 1.0);
+                    let pos = (mat * p_h).xyz();
+
+                    let n_h = Vector4::new(v.norm.x, v.norm.y, v.norm.z, 0.0);
+                    let norm = (mat * n_h).xyz().normalize();
+
+                    mesh.verts.push(mesh::Vertex {
+                        pos: DVec3::new(pos.x, pos.y, pos.z),
+                        norm: DVec3::new(norm.x, norm.y, norm.z),
+                        color: DVec3::new(job.color.x, job.color.y, job.color.z),
+                    });
+                }
+
+                for t in &face_triangles {
+                    let mut tri = *t;
+                    tri.verts.add_scalar_mut(v_offset);
+                    mesh.triangles.push(tri);
+                }
+            }
+
+            (mesh, local_stats)
+        })
+        .reduce(
+            || (Mesh::default(), Stats::default()),
+            |(a_mesh, a_stats), (b_mesh, b_stats)| {
+                (
+                    Mesh::combine(a_mesh, b_mesh),
+                    Stats::combine(a_stats, b_stats),
+                )
+            },
+        );
+
+    info!("num_faces: {}", stats.num_faces);
+    info!("num_errors: {}", stats.num_errors);
+    info!("num_panics: {}", stats.num_panics);
+
+    (mesh, stats)
+}
+
+// Helper function: triangulate a single face into local mesh
+fn advanced_face_to_mesh(
+    s: &StepFile,
+    f: AdvancedFace,
+    verts: &mut Vec<mesh::Vertex>,
+    triangles: &mut Vec<Triangle>,
+    stats: &mut Stats,
+) -> Result<(), Error> {
+    let face = s.entity(f).expect("Could not get AdvancedFace");
+    stats.num_faces += 1;
+
+    let mut surf = get_surface(s, face.face_geometry)?;
+
+    let v_start = verts.len();
+    let mut edges = Vec::new();
+    let mut num_pts = 0;
+
+    for b in &face.bounds {
+        let bound_contours = face_bound(s, *b)?;
+
+        match bound_contours.len() {
+            0 => panic!("Got empty contours"),
+            1 => {
+                num_pts += 1;
+                verts.push(mesh::Vertex {
+                    pos: bound_contours[0],
+                    norm: DVec3::zeros(),
+                    color: DVec3::zeros(),
+                });
+            }
+            _ => {
+                let start = num_pts;
+                for pt in bound_contours {
+                    edges.push((num_pts, num_pts + 1));
+                    verts.push(mesh::Vertex {
+                        pos: pt,
+                        norm: DVec3::zeros(),
+                        color: DVec3::zeros(),
+                    });
+                    num_pts += 1;
+                }
+                num_pts -= 1;
+                verts.pop();
+                edges.pop();
+                edges.last_mut().unwrap().1 = start;
+            }
+        }
+    }
+
+    let mut pts = surf.lower_verts(&mut verts[v_start..])?;
+    let bonus_points = pts.len();
+    surf.add_steiner_points(&mut pts, verts);
+
+    let result = std::panic::catch_unwind(|| {
+        let mut pts = pts.clone();
+        loop {
+            let mut t = match cdt::Triangulation::new_with_edges(&pts, &edges) {
+                Err(e) => break Err(e),
+                Ok(t) => t,
+            };
+            match t.run() {
+                Ok(()) => break Ok(t),
+                Err(cdt::Error::PointOnFixedEdge(p)) if p >= bonus_points => {
+                    pts[p] = pts[0];
+                    continue;
+                }
+                Err(e) => break Err(e),
+            }
+        }
+    });
+
+    match result {
+        Ok(Ok(t)) => {
+            for (a, b, c) in t.triangles() {
+                let (a, b, c) = (a as u32, b as u32, c as u32);
+                triangles.push(Triangle {
+                    verts: if face.same_sense {
+                        U32Vec3::new(a, b, c)
+                    } else {
+                        U32Vec3::new(a, c, b)
+                    },
+                });
+            }
+        }
+        Ok(Err(e)) => {
+            error!("Triangulation error: {:?}", e);
+            stats.num_errors += 1;
+        }
+        Err(e) => {
+            error!("Triangulation panic: {:?}", e);
+            stats.num_panics += 1;
+        }
+    }
+
+    if !face.same_sense {
+        for v in verts.iter_mut().skip(v_start) {
+            v.norm = -v.norm;
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(feature = "rayon")]
+pub fn triangulate4(s: &StepFile) -> (Mesh, Stats) {
+    use rayon::prelude::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    // Phase 1: Build face catalog with minimal allocations
+    let brep_colors: HashMap<_, DVec3> =
+        s.0.iter()
+            .filter_map(MechanicalDesignGeometricPresentationRepresentation_::try_from_entity)
+            .flat_map(|m| m.items.iter())
+            .filter_map(|item| s.entity(item.cast::<StyledItem_>()))
+            .filter_map(|styled| {
+                if styled.styles.len() == 1 {
+                    presentation_style_color(s, styled.styles[0]).map(|c| (styled.item, c))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+    let mut transform_stack = build_transform_stack(s, false);
+    let mut roots = transform_stack_roots(&transform_stack);
+    if roots.len() > 1 {
+        transform_stack = build_transform_stack(s, true);
+        roots = transform_stack_roots(&transform_stack);
+    }
+
+    let mut todo: Vec<_> = roots.into_iter().map(|v| (v, DMat4::identity())).collect();
+    let mut shape_rep_relationship: HashMap<Id<_>, Vec<Id<_>>> = HashMap::new();
+    for (r1, r2) in
+        s.0.iter()
+            .filter_map(ShapeRepresentationRelationship_::try_from_entity)
+            .map(|e| (e.rep_1, e.rep_2))
+    {
+        shape_rep_relationship.entry(r1).or_default().push(r2);
+    }
+
+    let mut to_mesh: HashMap<Id<_>, Vec<DMat4>> = HashMap::new();
+    while let Some((id, mat)) = todo.pop() {
+        for child in shape_rep_relationship.get(&id).unwrap_or(&vec![]) {
+            todo.push((*child, mat));
+        }
+        if let Some(children) = transform_stack.get(&id) {
+            for (child, next_mat) in children {
+                todo.push((*child, mat * next_mat));
+            }
+        } else {
+            let items = match &s[id] {
+                Entity::AdvancedBrepShapeRepresentation(b) => &b.items,
+                Entity::ShapeRepresentation(b) => &b.items,
+                Entity::ManifoldSurfaceShapeRepresentation(b) => &b.items,
+                _ => continue,
+            };
+
+            for m in items.iter() {
+                if matches!(
+                    &s[*m],
+                    Entity::ManifoldSolidBrep(_)
+                        | Entity::BrepWithVoids(_)
+                        | Entity::ShellBasedSurfaceModel(_)
+                ) {
+                    to_mesh.entry(*m).or_default().push(mat);
+                }
+            }
+        }
+    }
+
+    if to_mesh.is_empty() {
+        to_mesh =
+            s.0.iter()
+                .enumerate()
+                .filter(|(_i, e)| {
+                    matches!(
+                        e,
+                        Entity::ManifoldSolidBrep(_)
+                            | Entity::BrepWithVoids(_)
+                            | Entity::ShellBasedSurfaceModel(_)
+                    )
+                })
+                .map(|(i, _)| (Id::new(i), vec![DMat4::identity()]))
+                .collect();
+    }
+
+    // Phase 2: Extract all face IDs with metadata (no deep copies)
+    struct FaceTask<'a> {
+        face_id: AdvancedFace<'a>,
+        transforms: Vec<DMat4>,
+        color: DVec3,
+        flip_normal: bool,
+    }
+
+    let num_shells = to_mesh.len(); // Store this before moving to_mesh
+    let face_tasks: Vec<FaceTask> = to_mesh
+        .into_iter()
+        .flat_map(|(brep_id, mats)| {
+            let color = brep_colors
+                .get(&brep_id)
+                .copied()
+                .unwrap_or(DVec3::new(0.5, 0.5, 0.5));
+
+            collect_faces_from_brep(s, brep_id)
+                .into_iter()
+                .map(move |(face_id, flip)| FaceTask {
+                    face_id,
+                    transforms: mats.clone(),
+                    color,
+                    flip_normal: flip,
+                })
+        })
+        .collect();
+
+    // Phase 3: Parallel triangulation with pre-sized buffers
+    let total_faces = AtomicUsize::new(0);
+    let total_errors = AtomicUsize::new(0);
+    let total_panics = AtomicUsize::new(0);
+
+    let mesh = face_tasks
+        .par_iter()
+        .filter_map(|task| {
+            let mut verts = Vec::with_capacity(128); // Typical face has ~50-100 verts
+            let mut triangles = Vec::with_capacity(128);
+
+            total_faces.fetch_add(1, Ordering::Relaxed);
+
+            match triangulate_single_face(s, task.face_id, &mut verts, &mut triangles) {
+                Ok(()) => {
+                    if task.flip_normal {
+                        for v in &mut verts {
+                            v.norm = -v.norm;
+                        }
+                    }
+
+                    // Apply transforms and build final mesh
+                    let mut mesh = Mesh {
+                        verts: Vec::with_capacity(verts.len() * task.transforms.len()),
+                        triangles: Vec::with_capacity(triangles.len() * task.transforms.len()),
+                    };
+
+                    for mat in &task.transforms {
+                        let v_offset = mesh.verts.len() as u32;
+
+                        // Vectorized transform application
+                        for v in &verts {
+                            let p_h = DVec4::new(v.pos.x, v.pos.y, v.pos.z, 1.0);
+                            let n_h = DVec4::new(v.norm.x, v.norm.y, v.norm.z, 0.0);
+
+                            mesh.verts.push(mesh::Vertex {
+                                pos: (mat * p_h).xyz(),
+                                norm: (mat * n_h).xyz().normalize(),
+                                color: task.color,
+                            });
+                        }
+
+                        for t in &triangles {
+                            let mut tri = *t;
+                            tri.verts.add_scalar_mut(v_offset);
+                            mesh.triangles.push(tri);
+                        }
+                    }
+
+                    Some(mesh)
+                }
+                Err(Error::CouldNotLower) | Err(Error::UnknownSurfaceType) => {
+                    total_errors.fetch_add(1, Ordering::Relaxed);
+                    None
+                }
+                Err(_) => {
+                    total_panics.fetch_add(1, Ordering::Relaxed);
+                    None
+                }
+            }
+        })
+        .reduce(Mesh::default, Mesh::combine);
+
+    let stats = Stats {
+        num_shells,
+        num_faces: total_faces.load(Ordering::Relaxed),
+        num_errors: total_errors.load(Ordering::Relaxed),
+        num_panics: total_panics.load(Ordering::Relaxed),
+    };
+
+    (mesh, stats)
+}
+
+// Fast face collection without deep traversal
+fn collect_faces_from_brep<'a>(
+    s: &'a StepFile,
+    rep_item_id: Id<RepresentationItem_<'a>>,
+) -> Vec<(AdvancedFace<'a>, bool)> {
+    // Get the representation item first
+    let rep_item = &s[rep_item_id];
+
+    // Extract the actual entity that this representation item refers to
+    // The representation item will have a different structure depending on its type
+    match rep_item {
+        Entity::ManifoldSolidBrep(b) => s
+            .entity(b.outer)
+            .map(|cs: &ClosedShell_| cs.cfs_faces.iter().map(|f| (f.cast(), false)).collect())
+            .unwrap_or_default(),
+        Entity::ShellBasedSurfaceModel(b) => b
+            .sbsm_boundary
+            .iter()
+            .flat_map(|shell| match &s[*shell] {
+                Entity::ClosedShell(cs) => cs.cfs_faces.iter().map(|f| (f.cast(), false)).collect(),
+                Entity::OpenShell(os) => os.cfs_faces.iter().map(|f| (f.cast(), false)).collect(),
+                _ => vec![],
+            })
+            .collect(),
+        Entity::BrepWithVoids(b) => {
+            let mut faces: Vec<(AdvancedFace, bool)> = s
+                .entity(b.outer)
+                .map(|cs: &ClosedShell_| cs.cfs_faces.iter().map(|f| (f.cast(), false)).collect())
+                .unwrap_or_default();
+
+            for void_id in &b.voids {
+                if let Some(oriented) = s.entity(*void_id) {
+                    let flip = !oriented.orientation;
+                    if let Some(cs) = s.entity(oriented.closed_shell_element) {
+                        faces.extend(cs.cfs_faces.iter().map(|f| (f.cast(), flip)));
+                    }
+                }
+            }
+            faces
+        }
+        _ => vec![],
+    }
+}
+
+// Core triangulation - optimized hot path
+fn triangulate_single_face(
+    s: &StepFile,
+    f: AdvancedFace,
+    verts: &mut Vec<mesh::Vertex>,
+    triangles: &mut Vec<Triangle>,
+) -> Result<(), Error> {
+    let face = s.entity(f).ok_or(Error::CouldNotLower)?;
+    let mut surf = get_surface(s, face.face_geometry)?;
+
+    let v_start = verts.len();
+    let mut edges = Vec::with_capacity(face.bounds.len() * 32);
+    let mut num_pts = 0;
+
+    // Pre-allocate vertex buffer
+    verts.reserve(face.bounds.len() * 32);
+
+    for b in &face.bounds {
+        let bound_contours = face_bound(s, *b)?;
+
+        match bound_contours.len() {
+            0 => return Err(Error::CouldNotLower),
+            1 => {
+                num_pts += 1;
+                verts.push(mesh::Vertex {
+                    pos: bound_contours[0],
+                    norm: DVec3::zeros(),
+                    color: DVec3::zeros(),
+                });
+            }
+            _ => {
+                let start = num_pts;
+                for pt in &bound_contours[..bound_contours.len() - 1] {
+                    edges.push((num_pts, num_pts + 1));
+                    verts.push(mesh::Vertex {
+                        pos: *pt,
+                        norm: DVec3::zeros(),
+                        color: DVec3::zeros(),
+                    });
+                    num_pts += 1;
+                }
+                edges.last_mut().unwrap().1 = start;
+            }
+        }
+    }
+
+    let mut pts = surf.lower_verts(&mut verts[v_start..])?;
+    let bonus_points = pts.len();
+    surf.add_steiner_points(&mut pts, verts);
+
+    // Triangulation with retry logic (avoid panic overhead)
+    let t = loop {
+        match cdt::Triangulation::new_with_edges(&pts, &edges) {
+            Ok(mut t) => match t.run() {
+                Ok(()) => break t,
+                Err(cdt::Error::PointOnFixedEdge(p)) if p >= bonus_points => {
+                    pts[p] = pts[0];
+                    continue;
+                }
+                Err(_) => return Err(Error::CouldNotLower),
+            },
+            Err(_) => return Err(Error::CouldNotLower),
+        }
+    };
+
+    // Build triangles
+    triangles.reserve(pts.len() * 2);
+    for (a, b, c) in t.triangles() {
+        let (a, b, c) = (a as u32, b as u32, c as u32);
+        triangles.push(Triangle {
+            verts: if face.same_sense {
+                U32Vec3::new(a, b, c)
+            } else {
+                U32Vec3::new(a, c, b)
+            },
+        });
+    }
+
+    Ok(())
+}
+
+pub mod fucking_pythagoras;

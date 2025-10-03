@@ -9,3 +9,5 @@ Cargo.lock
 wasm/target
 wasm/pkg
 *.png
+*.step
+*.stp
