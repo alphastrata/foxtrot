@@ -38,7 +38,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let loader = std::thread::spawn(move || {
         let foxtrot_pipeline_start = std::time::Instant::now();
         use step::step_file::StepFile;
-        use triangulate::triangulate::triangulate4 as triangulate;
+        use triangulate::triangulate::wgpu_triangulate as triangulate;
 
         let data = std::fs::read(&input).expect("Could not open file");
         let flat = StepFile::strip_flatten(&data);
