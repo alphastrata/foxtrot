@@ -2,7 +2,7 @@ use nalgebra_glm as glm;
 use step::step_file::StepFile;
 use wgpu::util::DeviceExt;
 use wgpu::PollType;
-use log::{debug, error, trace, warn};
+use log::{error, trace};
 use crate::triangulate::{
     advanced_face_to_mesh as cpu_advanced_face_to_mesh, get_surface as cpu_get_surface,
 };

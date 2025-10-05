@@ -74,6 +74,90 @@ You can customize the behavior of `step_thumbnailer` by modifying the `Exec` lin
 | OCCT Angular Deflection   | `--occt-angular-deflection` | Angular deflection for OCCT triangulation. Default is `0.5`.                         |
 | Shaded Rendering          | `--shaded`                  | Use shaded rendering instead of wireframe.                                           |
 
+## 3. MIME:
+Yes, you are absolutely correct. For the system to know that `step_thumbnailer` should handle `.step` and `.stp` files, you first need to inform the desktop environment about this new file type. This process is called MIME (Multipurpose Internet Mail Extensions) type registration.
+
+Here is a guide on how to register the MIME type for STEP files. This should be considered a prerequisite to the thumbnailer setup.
+
+***
+
+## Registering the STEP File MIME Type on Linux
+
+Desktop environments on Linux use a shared MIME database to identify file types and associate them with applications and, in our case, thumbnailers. To register a new MIME type for STEP files, you'll need to create an XML file that defines the MIME type and its associated file extensions.
+
+This guide will walk you through creating a user-specific MIME type registration. System-wide installation follows a similar process but requires root permissions and placing files in system directories (like `/usr/share/mime/packages/`).
+
+### 1. Create the MIME Type Definition File
+
+First, you need to create a directory in your home folder where user-specific MIME definitions are stored.
+
+```bash
+mkdir -p ~/.local/share/mime/packages/
+```
+
+Next, create a new XML file in this directory. We'll name it `application-step.xml`.
+
+```bash
+nano ~/.local/share/mime/packages/application-step.xml
+```
+
+Paste the following content into this file. This defines a new MIME type, `application/step`, and associates the file extensions `.step`, `.stp`, `.STEP`, and `.STP` with it.
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns='http://www.freedesktop.org/standards/shared-mime-info'>
+  <mime-type type="application/step">
+    <comment>STEP 3D model</comment>
+    <glob pattern="*.step"/>
+    <glob pattern="*.stp"/>
+    <glob pattern="*.STEP"/>
+    <glob pattern="*.STP"/>
+  </mime-type>
+</mime-info>
+```
+
+Save and close the file.
+
+### 2. Update the MIME Database
+
+After creating the definition file, you need to update the shared MIME database. This command processes your new XML file and updates the cache that applications use to identify file types.
+
+Run the following command in your terminal:
+
+```bash
+update-mime-database ~/.local/share/mime
+```
+
+### 3. Verify the MIME Type Registration
+
+You can now verify that the system correctly identifies your STEP files.
+
+1.  **Find a STEP file** on your system (or create a dummy one: `touch my_model.step`).
+2.  **Use the `xdg-mime` command** to check its MIME type:
+
+    ```bash
+    xdg-mime query filetype my_model.step
+    ```
+
+    The expected output should be:
+
+    ```
+    application/step
+    ```
+
+### Putting It All Together with the Thumbnailer
+
+Once the MIME type is registered, you can proceed with setting up the `step_thumbnailer` as described previously. The key is that the `MimeType` line in your `step_thumbnailer.thumbnailer` file should now match the newly registered MIME type:
+
+**File: `~/.local/share/thumbnailers/step_thumbnailer.thumbnailer`**
+```ini
+[Thumbnailer Entry]
+Exec=step_thumbnailer -i %i -o %o -s %s
+MimeType=application/step;
+```
+
+By registering the MIME type first, you create a robust and standardized way for your system to recognize STEP files. This allows the thumbnailing system (and other applications) to correctly identify and handle these files.
+
 ## 3. Verification
 
 To see your new thumbnailer in action, you need to clear your existing thumbnail cache and have your file manager regenerate them.

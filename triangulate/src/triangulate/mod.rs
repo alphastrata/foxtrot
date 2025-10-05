@@ -951,7 +951,7 @@ pub fn triangulate2(s: &StepFile) -> (Mesh, Stats) {
                 .unwrap_or(Vector3::new(0.5, 0.5, 0.5));
 
             let mut template_mesh = Mesh::default();
-            match &s[**id] {
+            match &s[*id] {
                 Entity::ManifoldSolidBrep(b) => {
                     closed_shell(s, b.outer, &mut template_mesh, &mut local_stats);
                 }
@@ -982,7 +982,7 @@ pub fn triangulate2(s: &StepFile) -> (Mesh, Stats) {
                     }
                 }
                 _ => {
-                    warn!("Skipping {:?} (not a known solid)", s[**id]);
+                    warn!("Skipping {:?} (not a known solid)", s[*id]);
                     return (local_mesh, local_stats);
                 }
             };
@@ -1034,7 +1034,7 @@ pub fn triangulate2(s: &StepFile) -> (Mesh, Stats) {
                 .unwrap_or(Vector3::new(0.5, 0.5, 0.5));
 
             let mut template_mesh = Mesh::default();
-            match &s[**id] {
+            match &s[*id] {
                 Entity::ManifoldSolidBrep(b) => {
                     closed_shell(s, b.outer, &mut template_mesh, &mut local_stats);
                 }
@@ -1065,7 +1065,7 @@ pub fn triangulate2(s: &StepFile) -> (Mesh, Stats) {
                     }
                 }
                 _ => {
-                    warn!("Skipping {:?} (not a known solid)", s[**id]);
+                    warn!("Skipping {:?} (not a known solid)", s[*id]);
                     return (local_mesh, local_stats);
                 }
             };

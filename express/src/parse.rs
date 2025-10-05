@@ -1,3 +1,4 @@
+#[allow(dead_code)]
 use memchr::{memchr, memchr_iter};
 use nom::{
     branch::alt,
@@ -30,14 +31,14 @@ fn char<'a>(c: char) -> impl FnMut(&'a str) -> IResult<'a, char> {
 }
 
 /// Overloaded version of nom's `tag` that eats trailing whitespace
-fn tag<'a>(s: &'a str) -> impl FnMut(&'a str) -> IResult<&'a str> {
+fn tag<'a>(s: &'a str) -> impl FnMut(&'a str) -> IResult<'a, &'a str> {
     ws(nom::bytes::complete::tag(s))
 }
 
 /// Matches a specific keyword, which ensuring that it's not followed by
 /// a letter.  This avoids cases like `generic_expression` being parsed as
 /// `generic`, `_expression`.
-fn kw<'a>(s: &'a str) -> impl FnMut(&'a str) -> IResult<&'a str> {
+fn kw<'a>(s: &'a str) -> impl FnMut(&'a str) -> IResult<'a, &'a str> {
     ws(terminated(
         nom::bytes::complete::tag(s),
         not(alt((letter, digit, char('_')))),
@@ -137,14 +138,14 @@ pub fn strip_comments_and_lower(data: &[u8]) -> String {
 }
 
 /// Main entry function for the parser
-pub fn parse(s: &str) -> IResult<Syntax> {
+pub fn parse(s: &str) -> IResult<'_, Syntax<'_>> {
     syntax(s)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
 // 124
-fn digit(s: &str) -> IResult<char> {
+fn digit(s: &str) -> IResult<'_, char> {
     nom::character::complete::one_of("0123456789")(s)
 }
 
@@ -152,29 +153,29 @@ fn digit(s: &str) -> IResult<char> {
 // skipped due to using fast_float
 
 // 126
-fn encoded_character(s: &str) -> IResult<char> {
+fn encoded_character(s: &str) -> IResult<'_, char> {
     map(recognize(tuple((octet, octet, octet, octet))), |v| {
         std::char::from_u32(u32::from_str_radix(v, 16).unwrap()).unwrap()
     })(s)
 }
 
 // 127
-fn hex_digit(s: &str) -> IResult<char> {
+fn hex_digit(s: &str) -> IResult<'_, char> {
     alt((digit, nom::character::complete::one_of("abcdef")))(s)
 }
 
 // 128
-fn letter(s: &str) -> IResult<char> {
+fn letter(s: &str) -> IResult<'_, char> {
     nom::character::complete::one_of("abcdefghijklmnopqrstuvwxyz")(s)
 }
 
 // 132
-fn not_paren_star_quote_special(s: &str) -> IResult<char> {
+fn not_paren_star_quote_special(s: &str) -> IResult<'_, char> {
     nom::character::complete::one_of("!\"#$%&+,-./:;<=>?@[\\]^_‘{|}~")(s)
 }
 
 // 134
-fn not_quote(s: &str) -> IResult<char> {
+fn not_quote(s: &str) -> IResult<'_, char> {
     alt((
         not_paren_star_quote_special,
         letter,
@@ -184,12 +185,12 @@ fn not_quote(s: &str) -> IResult<char> {
 }
 
 // 136
-fn octet(s: &str) -> IResult<&str> {
+fn octet(s: &str) -> IResult<'_, &str> {
     recognize(pair(hex_digit, hex_digit))(s)
 }
 
 // 139
-fn binary_literal(s: &str) -> IResult<usize> {
+fn binary_literal(s: &str) -> IResult<'_, usize> {
     map(
         preceded(char('%'), many1(alt((char('0'), char('1'))))),
         |bits: Vec<char>| {
@@ -216,13 +217,13 @@ fn encoded_string_literal(s: &str) -> IResult<String> {
 // skipped because we're using fast_float instead
 
 // 142
-fn real_literal_(s: &str) -> IResult<f64> {
+fn real_literal_(s: &str) -> IResult<'_, f64> {
     match fast_float::parse_partial::<f64, _>(s) {
         Err(_) => build_err(s, "Could not parse float"),
         Ok((x, n)) => Ok((&s[n..], x)),
     }
 }
-fn real_literal(s: &str) -> IResult<f64> {
+fn real_literal(s: &str) -> IResult<'_, f64> {
     ws(real_literal_)(s)
 }
 
@@ -356,12 +357,12 @@ impl<'a> SimpleId<'a> {
         }
     }
 }
-fn simple_id(s: &str) -> IResult<SimpleId> {
+fn simple_id(s: &str) -> IResult<'_, SimpleId<'_>> {
     SimpleId::parse(s)
 }
 
 // 144 simple_string_literal = \q { ( \q \q ) | not_quote | \s | \x9 | \xA | \xD } \q .
-fn simple_string_literal(s: &str) -> IResult<String> {
+fn simple_string_literal(s: &str) -> IResult<'_, String> {
     let f = alt((
         map(tag("''"), |_| '\''),
         not_quote,

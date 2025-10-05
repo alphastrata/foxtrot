@@ -1,4 +1,4 @@
-use std::time::SystemTime;
+
 use wgpu::{
     Device, DeviceDescriptor, Extent3d, Features, Instance, InstanceDescriptor, Limits,
     MemoryHints, PowerPreference, Queue, RequestAdapterOptions, Texture, TextureDescriptor,
