@@ -2,6 +2,7 @@ use nalgebra_glm as glm;
 use step::step_file::StepFile;
 use wgpu::util::DeviceExt;
 use wgpu::PollType;
+use log::{debug, error, trace, warn};
 use crate::triangulate::{
     advanced_face_to_mesh as cpu_advanced_face_to_mesh, get_surface as cpu_get_surface,
 };
@@ -467,24 +468,24 @@ pub async fn gpu_raise_and_transform(
     surface: &Surface,
     transforms: &[glm::DMat4],
 ) -> Result<Vec<Vertex>, Box<dyn std::error::Error>> {
-    eprintln!("gpu_raise_and_transform: Starting");
+    trace!("gpu_raise_and_transform: Starting");
 
     let gpu_surface = to_gpu_surface(surface);
-    eprintln!("gpu_raise_and_transform: Surface converted");
+    trace!("gpu_raise_and_transform: Surface converted");
 
     // Convert UV coordinates to GPU format
     let gpu_uvs: Vec<[f32; 4]> = template_uvs
         .iter()
         .map(|uv| [uv.0 as f32, uv.1 as f32, 0.0, 0.0])
         .collect();
-    eprintln!("gpu_raise_and_transform: UVs converted, count: {}", gpu_uvs.len());
+    trace!("gpu_raise_and_transform: UVs converted, count: {}", gpu_uvs.len());
 
     // Convert normals to GPU format
     let gpu_normals: Vec<[f32; 4]> = template_normals
         .iter()
         .map(|n| [n.x as f32, n.y as f32, n.z as f32, 0.0])
         .collect();
-    eprintln!("gpu_raise_and_transform: Normals converted, count: {}", gpu_normals.len());
+    trace!("gpu_raise_and_transform: Normals converted, count: {}", gpu_normals.len());
 
     // Convert transforms to GPU format
     let gpu_transforms: Vec<GpuTransform> = transforms
@@ -493,7 +494,7 @@ pub async fn gpu_raise_and_transform(
             transform: mat_to_f32_array(t),
         })
         .collect();
-    eprintln!("gpu_raise_and_transform: Transforms converted, count: {}", gpu_transforms.len());
+    trace!("gpu_raise_and_transform: Transforms converted, count: {}", gpu_transforms.len());
 
     // Create GPU buffers
     let surface_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -501,28 +502,28 @@ pub async fn gpu_raise_and_transform(
         contents: bytemuck::cast_slice(&[gpu_surface]),
         usage: wgpu::BufferUsages::UNIFORM,
     });
-    eprintln!("gpu_raise_and_transform: Surface buffer created");
+    trace!("gpu_raise_and_transform: Surface buffer created");
 
     let template_uvs_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("Template UVs Buffer"),
         contents: bytemuck::cast_slice(&gpu_uvs),
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
     });
-    eprintln!("gpu_raise_and_transform: Template UVs buffer created");
+    trace!("gpu_raise_and_transform: Template UVs buffer created");
 
     let template_normals_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("Template Normals Buffer"),
         contents: bytemuck::cast_slice(&gpu_normals),
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
     });
-    eprintln!("gpu_raise_and_transform: Template normals buffer created");
+    trace!("gpu_raise_and_transform: Template normals buffer created");
 
     let transforms_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("Transforms Buffer"),
         contents: bytemuck::cast_slice(&gpu_transforms),
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
     });
-    eprintln!("gpu_raise_and_transform: Transforms buffer created");
+    trace!("gpu_raise_and_transform: Transforms buffer created");
 
     // Create output buffer for final vertices
     let num_output_vertices = template_uvs.len() * transforms.len();
@@ -532,7 +533,7 @@ pub async fn gpu_raise_and_transform(
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
         mapped_at_creation: false,
     });
-    eprintln!("gpu_raise_and_transform: Output buffer created, size: {}, expected vertices: {}", output_vertices_buffer.size(), num_output_vertices);
+    trace!("gpu_raise_and_transform: Output buffer created, size: {}, expected vertices: {}", output_vertices_buffer.size(), num_output_vertices);
 
     // Load shader code
     let shader_code = std::include_str!("surface_raising.wgsl");
@@ -540,7 +541,7 @@ pub async fn gpu_raise_and_transform(
         label: Some("Surface Raising Shader"),
         source: wgpu::ShaderSource::Wgsl(shader_code.into()),
     });
-    eprintln!("gpu_raise_and_transform: Shader module created");
+    trace!("gpu_raise_and_transform: Shader module created");
 
     // Create bind group layout
     let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -598,7 +599,7 @@ pub async fn gpu_raise_and_transform(
         ],
         label: Some("Raise and Transform Bind Group Layout"),
     });
-    eprintln!("gpu_raise_and_transform: Bind group layout created");
+    trace!("gpu_raise_and_transform: Bind group layout created");
 
     // Create bind group
     let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -627,7 +628,7 @@ pub async fn gpu_raise_and_transform(
         ],
         label: Some("Raise and Transform Bind Group"),
     });
-    eprintln!("gpu_raise_and_transform: Bind group created");
+    trace!("gpu_raise_and_transform: Bind group created");
 
     // Create compute pipeline
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -635,7 +636,7 @@ pub async fn gpu_raise_and_transform(
         bind_group_layouts: &[&bind_group_layout],
         push_constant_ranges: &[],
     });
-    eprintln!("gpu_raise_and_transform: Pipeline layout created");
+    trace!("gpu_raise_and_transform: Pipeline layout created");
 
     let compute_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
         label: Some("Raise and Transform Compute Pipeline"),
@@ -645,7 +646,7 @@ pub async fn gpu_raise_and_transform(
         compilation_options: Default::default(),
         cache: None,
     });
-    eprintln!("gpu_raise_and_transform: Compute pipeline created");
+    trace!("gpu_raise_and_transform: Compute pipeline created");
 
     // Create a staging buffer to read the results back from the GPU
     let staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -654,18 +655,18 @@ pub async fn gpu_raise_and_transform(
         usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
-    eprintln!("gpu_raise_and_transform: Staging buffer created, size: {}", staging_buffer.size());
+    trace!("gpu_raise_and_transform: Staging buffer created, size: {}", staging_buffer.size());
 
     // Create command encoder and compute pass - this should happen before the copy
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
-    eprintln!("gpu_raise_and_transform: Command encoder created");
+    trace!("gpu_raise_and_transform: Command encoder created");
     {
         let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
         cpass.set_pipeline(&compute_pipeline);
         cpass.set_bind_group(0, &bind_group, &[]);
         cpass.dispatch_workgroups((num_output_vertices as u32 + 63) / 64, 1, 1); // 64 workgroup size
     }
-    eprintln!("gpu_raise_and_transform: Compute pass completed");
+    trace!("gpu_raise_and_transform: Compute pass completed");
 
     // Copy the output buffer to the staging buffer
     encoder.copy_buffer_to_buffer(
@@ -675,53 +676,53 @@ pub async fn gpu_raise_and_transform(
         0,
         output_vertices_buffer.size(),
     );
-    eprintln!("gpu_raise_and_transform: Copy command issued");
+    trace!("gpu_raise_and_transform: Copy command issued");
 
     // Submit the command encoder
     let command_buffer = encoder.finish();
     queue.submit(Some(command_buffer));
-    eprintln!("gpu_raise_and_transform: Command buffer submitted");
+    trace!("gpu_raise_and_transform: Command buffer submitted");
 
     // Wait for GPU operations to complete
     let _ = device.poll(PollType::Wait {
         submission_index: None,
         timeout: None,
     });
-    eprintln!("gpu_raise_and_transform: Device poll completed - GPU operations should be done");
+    trace!("gpu_raise_and_transform: Device poll completed - GPU operations should be done");
 
     // Read the results back from the staging buffer
-    eprintln!("gpu_raise_and_transform: Template UVs buffer size: {}, Template normals buffer size: {}, Transforms buffer size: {}, Output buffer size: {}, Staging buffer size: {}", 
+    trace!("gpu_raise_and_transform: Template UVs buffer size: {}, Template normals buffer size: {}, Transforms buffer size: {}, Output buffer size: {}, Staging buffer size: {}", 
         template_uvs_buffer.size(), template_normals_buffer.size(), transforms_buffer.size(), 
         output_vertices_buffer.size(), staging_buffer.size());
     assert_eq!(output_vertices_buffer.size(), staging_buffer.size(), "Buffer sizes must match");
 
     let buffer_slice = staging_buffer.slice(..);
-    eprintln!("gpu_raise_and_transform: Buffer slice created");
+    trace!("gpu_raise_and_transform: Buffer slice created");
     let (sender, receiver) = std::sync::mpsc::channel();
-    eprintln!("gpu_raise_and_transform: Channel created");
+    trace!("gpu_raise_and_transform: Channel created");
     
     buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
-        eprintln!("gpu_raise_and_transform: map_async callback called with result: {:?}", result.is_ok());
+        trace!("gpu_raise_and_transform: map_async callback called with result: {:?}", result.is_ok());
         sender.send(result).unwrap();
     });
-    eprintln!("gpu_raise_and_transform: map_async called");
+    trace!("gpu_raise_and_transform: map_async called");
 
     // Wait for the mapping to complete using new wgpu 27 syntax (single poll)
     let _ = device.poll(PollType::Wait {
         submission_index: None,
         timeout: None,
     });
-    eprintln!("gpu_raise_and_transform: Device poll completed after mapping");
+    trace!("gpu_raise_and_transform: Device poll completed after mapping");
 
     // Use timeout to prevent indefinite blocking
     match receiver.recv_timeout(std::time::Duration::from_secs(5)) {
         Ok(Ok(())) => {
-            eprintln!("gpu_raise_and_transform: Buffer mapping succeeded");
+            trace!("gpu_raise_and_transform: Buffer mapping succeeded");
             let data = buffer_slice.get_mapped_range();
             let result: Vec<GpuInputVertex> = bytemuck::cast_slice(&data).to_vec();
             drop(data);  // Drop the mapped range before unmap
             staging_buffer.unmap();
-            eprintln!("gpu_raise_and_transform: Buffer unmapped");
+            trace!("gpu_raise_and_transform: Buffer unmapped");
 
             let vertices: Vec<Vertex> = result
                 .iter()
@@ -731,15 +732,15 @@ pub async fn gpu_raise_and_transform(
                     color: glm::DVec3::new(v.color[0] as f64, v.color[1] as f64, v.color[2] as f64),
                 })
                 .collect();
-            eprintln!("gpu_raise_and_transform: Successfully returning {} vertices", vertices.len());
+            trace!("gpu_raise_and_transform: Successfully returning {} vertices", vertices.len());
             Ok(vertices)
         }
         Ok(Err(e)) => {
-            eprintln!("gpu_raise_and_transform: Buffer mapping failed: {:?}", e);
+            error!("gpu_raise_and_transform: Buffer mapping failed: {:?}", e);
             Err(format!("Buffer mapping failed: {:?}", e).into())
         },
         Err(_) => {
-            eprintln!("gpu_raise_and_transform: Buffer mapping timed out");
+            error!("gpu_raise_and_transform: Buffer mapping timed out");
             Err("Buffer mapping timed out".into())
         },
     }
@@ -817,7 +818,7 @@ pub fn triangulate_faces(
                             &device, &queue, &verts, &surface,
                         ))
                         .unwrap_or_else(|e| {
-                            eprintln!("GPU lowering failed: {}", e);
+                            error!("GPU lowering failed: {}", e);
                             total_errors.fetch_add(1, Ordering::Relaxed);
                             Vec::new()
                         });
@@ -839,7 +840,7 @@ pub fn triangulate_faces(
                             &task.transforms,
                         ))
                         .unwrap_or_else(|e| {
-                            eprintln!("GPU raising failed: {}", e);
+                            error!("GPU raising failed: {}", e);
                             total_errors.fetch_add(1, Ordering::Relaxed);
                             Vec::new()
                         });
@@ -916,18 +917,13 @@ mod tests {
 
     #[test]
     fn test_gpu_lowering_and_raising() {
-        eprintln!("test_gpu_lowering_and_raising: Starting test");
 
         // This test requires a GPU and might not run in all CI environments.
         // It's here for local testing.
         let (device, queue) = match create_wgpu_device() {
-            Ok(dq) => {
-                eprintln!("test_gpu_lowering_and_raising: Created wgpu device and queue");
-                dq
-            },
+            Ok(dq) => dq,
             Err(_) => {
-                eprintln!("test_gpu_lowering_and_raising: Skipping GPU test: could not create wgpu device.");
-                return;
+                return; // Skip test if GPU device not available
             }
         };
 
@@ -936,7 +932,6 @@ mod tests {
             normal: glm::vec3(0.0, 0.0, 1.0),
             mat_i: glm::identity(),
         };
-        eprintln!("test_gpu_lowering_and_raising: Created surface");
 
         // 2. Define some vertices on that surface
         let vertices = vec![
@@ -951,40 +946,37 @@ mod tests {
                 color: glm::vec3(0.0, 1.0, 0.0),
             },
         ];
-        eprintln!("test_gpu_lowering_and_raising: Created {} test vertices", vertices.len());
 
         // 3. Lower vertices to UVs
-        eprintln!("test_gpu_lowering_and_raising: Starting GPU lowering");
         let uvs = pollster::block_on(gpu_lower_vertices(&device, &queue, &vertices, &surface))
             .expect("GPU lowering failed");
-        eprintln!("test_gpu_lowering_and_raising: GPU lowering completed, got {} UVs", uvs.len());
 
         // For a simple XY plane, we should get 2 UV coordinates back
-        assert_eq!(uvs.len(), 2);
-        eprintln!("test_gpu_lowering_and_raising: Expected UV[0] = (1.0, 2.0), got ({}, {})", uvs[0].0, uvs[0].1);
-        eprintln!("test_gpu_lowering_and_raising: Expected UV[1] = (3.0, 4.0), got ({}, {})", uvs[1].0, uvs[1].1);
+        assert_eq!(uvs.len(), 2, "Expected 2 UV coordinates, got {}", uvs.len());
+        // Check that UV coordinates are approximately correct (for a plane, UVs should match the input X,Y coordinates)
+        // Original vertices were (1.0, 2.0, 0.0) and (3.0, 4.0, 0.0), so UVs should be (1.0, 2.0) and (3.0, 4.0)
+        assert!((uvs[0].0 - 1.0).abs() < 1e-6 && (uvs[0].1 - 2.0).abs() < 1e-6, 
+                "Expected UV[0] ~ (1.0, 2.0), got ({}, {})", uvs[0].0, uvs[0].1);
+        assert!((uvs[1].0 - 3.0).abs() < 1e-6 && (uvs[1].1 - 4.0).abs() < 1e-6, 
+                "Expected UV[1] ~ (3.0, 4.0), got ({}, {})", uvs[1].0, uvs[1].1);
         
         // For now, just verify that we got reasonable values back (the main goal is having GPU functions work)
         // The exact mapping might need shader refinement
         assert!(uvs[0].0.is_finite() && uvs[0].1.is_finite(), "UV[0] should be finite");
         assert!(uvs[1].0.is_finite() && uvs[1].1.is_finite(), "UV[1] should be finite");
-        eprintln!("test_gpu_lowering_and_raising: UV validation passed (finite values check)");
 
         // 4. Raise UVs back to 3D vertices (commented out for now to isolate the lower issue)
-        // let normals: Vec<glm::DVec3> = vertices.iter().map(|v| v.norm).collect();
-        // let transforms = vec![glm::identity()]; // No transformation
-        // let raised_vertices =
-        //     pollster::block_on(gpu_raise_and_transform(&device, &queue, &uvs, &normals, &surface, &transforms))
-        //         .expect("GPU raising failed");
+        let normals: Vec<glm::DVec3> = vertices.iter().map(|v| v.norm).collect();
+        let transforms = vec![glm::identity()]; // No transformation
+        let raised_vertices =
+            pollster::block_on(gpu_raise_and_transform(&device, &queue, &uvs, &normals, &surface, &transforms))
+                .expect("GPU raising failed");
 
-        // // 5. Check if the raised vertices match the original ones
-        // assert_eq!(raised_vertices.len(), 2);
-        // for i in 0..vertices.len() {
-        //     assert!((raised_vertices[i].pos - vertices[i].pos).norm() < 1e-6);
-        //     // Normals might be recomputed, let's check they are correct for a plane
-        //     assert!((raised_vertices[i].norm - glm::vec3(0.0, 0.0, 1.0)).norm() < 1e-6);
-        // }
-        
-        eprintln!("test_gpu_lowering_and_raising: Test completed successfully");
-    }
-}
+        // 5. Check if the raised vertices match the original ones
+        assert_eq!(raised_vertices.len(), 2);
+        for i in 0..vertices.len() {
+            assert!((raised_vertices[i].pos - vertices[i].pos).norm() < 1e-6);
+            // Normals might be recomputed, let's check they are correct for a plane
+            assert!((raised_vertices[i].norm - glm::vec3(0.0, 0.0, 1.0)).norm() < 1e-6);
+        }
+}}

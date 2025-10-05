@@ -2,6 +2,7 @@ use criterion::{Criterion, criterion_group, criterion_main};
 use std::fs;
 use step::step_file::StepFile;
 use triangulate::triangulate;
+use log::warn;
 
 fn benchmark_triangulate(c: &mut Criterion) {
     // Load a test STEP file for benchmarking by reading it in the benchmark setup
@@ -49,26 +50,27 @@ fn benchmark_triangulate(c: &mut Criterion) {
                         _ = triangulate::triangulate4(&step_file);
                     });
                 });
-                group.bench_function("triangulate-smart-cache", |b| {
+                group.bench_function("triangulate-5", |b| {
                     b.iter(|| {
                         _ = triangulate::fucking_pythagoras::triangulate5(&step_file);
                     });
                 });
-                group.bench_function("triangulate-best-of-all", |b| {
+                group.bench_function("triangulate-6", |b| {
                     b.iter(|| {
                         _ = triangulate::fucking_pythagoras::triangulate6(&step_file);
                     });
                 });
-                group.bench_function("triangulate-wgpu", |b| {
-                    b.iter(|| {
-                        _ = triangulate::wgpu_triangulate(&step_file);
-                    });
-                });
+                // NOTE: takes too long 1s/run and it's WRONG so leave commented out pls.
+                // group.bench_function("triangulate-wgpu", |b| {
+                //     b.iter(|| {
+                //         _ = triangulate::wgpu_triangulate(&step_file);
+                //     });
+                // });
 
                 group.finish();
             }
         } else {
-            eprintln!("Warning: STEP file is empty, benchmarking will not be meaningful");
+            warn("Warning: STEP file is empty, benchmarking will not be meaningful");
         }
     }
 }

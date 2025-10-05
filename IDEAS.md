@@ -1,10 +1,16 @@
 # Things to try out:
 
 
+### misc:
+- We need more tests in the triangulation, and cdt area.
+- the wgpu code is currently wrong (at triangulating) so the tests for the above should be a refrerence for future development against (despite wgpu being much slower than the CPU for triangulation, I still believe in sufficently large batch jobs, and to alleviate cpu pressure! it can, or at least could be useful.)
+- All other crates these days call it `rayon` if that's what you're using so we should update the `parallel` feature to be `rayon` everywhere
+- rename unwisely named fucking_pythagoras.rs to something mose sensible... move ALL but the original fn triangulate() so that's all the numbered ones into that new file. (the wgpu ones can stay where they are.)
+
+
 ### Speed:
 - remove all `std::collections::HashMap` everywhere and replace them with `ahash`.
 - write a custom hasher specifically for our kinda data (the step spec is enumerable so... we can do betterer..)
-- try a wgsl implementation of triangulate. [QUESTION: how many bytes are all our test data?]
 - `libm` in place of all existing math stuff, everywhere.
 - `samply` the `thumbnailer` or similar so we can find the exact hottest loops (undoubtedly within meshing)
 
@@ -120,9 +126,10 @@ pub fn combine_many(meshes: Vec<Self>) -> Self {
 - `.github` pipeline
 - data fetching scripts
 - typos, mdformat, ruff, clippy configs
-- All other crates these days call it `rayon` if that's what you're using so we should update the `parallel` feature to be `rayon` everywhere
-- rename unwisely named fucking_pythagoras.rs to something mose sensible... move ALL but the original fn triangulate() so that's all the numbered ones into that new file. (the wgpu ones can stay where they are.)
 
 ### DEEPNESS:
 - are we getting any SIMD?
 - of all your machines how shit are we??? does perf scale with cores?
+
+
+~- try a wgsl implementation of triangulate. [QUESTION: how many bytes are all our test data?]~DONE
