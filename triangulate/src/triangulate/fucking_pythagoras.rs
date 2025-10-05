@@ -736,12 +736,6 @@ pub fn triangulate6(s: &StepFile) -> (Mesh, Stats) {
                 .collect();
     }
 
-    struct FaceTask<'a> {
-        face_id: AdvancedFace<'a>,
-        transforms: Vec<DMat4>,
-        color: DVec3,
-        flip_normal: bool,
-    }
 
     let num_shells = to_mesh.len();
     let face_tasks: Vec<FaceTask> = to_mesh

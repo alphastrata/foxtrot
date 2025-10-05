@@ -790,7 +790,7 @@ impl App {
 
         // Wait for the mapping to complete
         // Since this is a blocking operation in an async context, use device.poll to wait
-        self.graphics_device.poll(wgpu::PollType::Wait {
+        _= self.graphics_device.poll(wgpu::PollType::Wait {
             submission_index: None,
             timeout: None,
         });

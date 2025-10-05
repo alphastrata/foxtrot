@@ -9,6 +9,7 @@ use nalgebra_glm as glm;
 use rayon::prelude::*;
 
 pub mod fucking_pythagoras;
+
 #[cfg(feature = "wgpu")]
 pub mod wgpu_impl;
 
@@ -31,7 +32,7 @@ use step::{
 
 const SAVE_DEBUG_SVGS: bool = false;
 const SAVE_PANIC_SVGS: bool = false;
-pub(crate) struct FaceTask<'a> {
+pub struct FaceTask<'a> {
     face_id: AdvancedFace<'a>,
     transforms: Vec<DMat4>,
     color: DVec3,
@@ -1652,9 +1653,107 @@ fn triangulate_single_face(
     Ok(())
 }
 
+
+
 #[cfg(feature = "wgpu")]
 pub fn wgpu_triangulate(s: &StepFile) -> (Mesh, Stats) {
-    // For stability, use the proven CPU implementation
-    // GPU implementation is not complete and causes crashes
-    crate::triangulate::fucking_pythagoras::triangulate6(s)
+    // Phase 1: Build face catalog with minimal allocations
+    let brep_colors: HashMap<_, DVec3> =
+        s.0.iter()
+            .filter_map(MechanicalDesignGeometricPresentationRepresentation_::try_from_entity)
+            .flat_map(|m| m.items.iter())
+            .filter_map(|item| s.entity(item.cast::<StyledItem_>()))
+            .filter_map(|styled| {
+                if styled.styles.len() == 1 {
+                    presentation_style_color(s, styled.styles[0]).map(|c| (styled.item, c))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+    let mut transform_stack = build_transform_stack(s, false);
+    let mut roots = transform_stack_roots(&transform_stack);
+    if roots.len() > 1 {
+        transform_stack = build_transform_stack(s, true);
+        roots = transform_stack_roots(&transform_stack);
+    }
+
+    let mut todo: Vec<_> = roots.into_iter().map(|v| (v, DMat4::identity())).collect();
+    let mut shape_rep_relationship: HashMap<Id<_>, Vec<Id<_>>> = HashMap::new();
+    for (r1, r2) in
+        s.0.iter()
+            .filter_map(ShapeRepresentationRelationship_::try_from_entity)
+            .map(|e| (e.rep_1, e.rep_2))
+    {
+        shape_rep_relationship.entry(r1).or_default().push(r2);
+    }
+
+    let mut to_mesh: HashMap<Id<_>, Vec<DMat4>> = HashMap::new();
+    while let Some((id, mat)) = todo.pop() {
+        for child in shape_rep_relationship.get(&id).unwrap_or(&vec![]) {
+            todo.push((*child, mat));
+        }
+        if let Some(children) = transform_stack.get(&id) {
+            for (child, next_mat) in children {
+                todo.push((*child, mat * next_mat));
+            }
+        } else {
+            let items = match &s[id] {
+                Entity::AdvancedBrepShapeRepresentation(b) => &b.items,
+                Entity::ShapeRepresentation(b) => &b.items,
+                Entity::ManifoldSurfaceShapeRepresentation(b) => &b.items,
+                _ => continue,
+            };
+
+            for m in items.iter() {
+                if matches!(
+                    &s[*m],
+                    Entity::ManifoldSolidBrep(_)
+                        | Entity::BrepWithVoids(_)
+                        | Entity::ShellBasedSurfaceModel(_)
+                ) {
+                    to_mesh.entry(*m).or_default().push(mat);
+                }
+            }
+        }
+    }
+
+    if to_mesh.is_empty() {
+        to_mesh =
+            s.0.iter()
+                .enumerate()
+                .filter(|(_i, e)| {
+                    matches!(
+                        e,
+                        Entity::ManifoldSolidBrep(_)
+                            | Entity::BrepWithVoids(_)
+                            | Entity::ShellBasedSurfaceModel(_)
+                    )
+                })
+                .map(|(i, _)| (Id::new(i), vec![DMat4::identity()]))
+                .collect();
+    }
+
+    // Phase 2: Extract all face IDs with metadata (no deep copies)
+    let face_tasks: Vec<FaceTask> = to_mesh
+        .into_iter()
+        .flat_map(|(brep_id, mats)| {
+            let color = brep_colors
+                .get(&brep_id)
+                .copied()
+                .unwrap_or(DVec3::new(0.5, 0.5, 0.5));
+
+            collect_faces_from_brep(s, brep_id)
+                .into_iter()
+                .map(move |(face_id, flip)| FaceTask {
+                    face_id,
+                    transforms: mats.clone(),
+                    color,
+                    flip_normal: flip,
+                })
+        })
+        .collect();
+
+    wgpu_impl::triangulate_faces(s, &face_tasks)
 }

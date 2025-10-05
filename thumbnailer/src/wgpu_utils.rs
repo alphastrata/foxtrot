@@ -1,15 +1,19 @@
-use wgpu::{Device, Queue, Texture, TextureDescriptor, TextureFormat, TextureUsages, TextureView, Extent3d, DeviceDescriptor, RequestAdapterOptions, Instance, InstanceDescriptor, PowerPreference, Features, Limits, MemoryHints, Trace};
 use std::time::SystemTime;
+use wgpu::{
+    Device, DeviceDescriptor, Extent3d, Features, Instance, InstanceDescriptor, Limits,
+    MemoryHints, PowerPreference, Queue, RequestAdapterOptions, Texture, TextureDescriptor,
+    TextureFormat, TextureUsages, TextureView, Trace,
+};
 
 pub fn create_wgpu_device() -> Result<(Device, Queue), Box<dyn std::error::Error>> {
-    let _start = SystemTime::now();  // Prefixed with underscore to indicate unused
     let instance = Instance::new(&InstanceDescriptor::default());
 
     let adapter = pollster::block_on(instance.request_adapter(&RequestAdapterOptions {
         power_preference: PowerPreference::HighPerformance,
         force_fallback_adapter: false,
         ..Default::default()
-    })).expect("Failed to find an appropriate adapter");
+    }))
+    .expect("Failed to find an appropriate adapter");
 
     let (device, queue) = pollster::block_on(adapter.request_device(&DeviceDescriptor {
         label: None,
@@ -19,7 +23,8 @@ pub fn create_wgpu_device() -> Result<(Device, Queue), Box<dyn std::error::Error
         memory_hints: MemoryHints::Performance,
         trace: Trace::Off,
         experimental_features: wgpu::ExperimentalFeatures::disabled(),
-    })).expect("Failed to create device");
+    }))
+    .expect("Failed to create device");
 
     Ok((device, queue))
 }

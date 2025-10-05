@@ -31,6 +31,28 @@ struct GpuTransform {
     transform: mat4x4<f32>,
 };
 
+fn rigid_inverse(m: mat4x4<f32>) -> mat4x4<f32> {
+    let r0 = m[0].xyz;
+    let r1 = m[1].xyz;
+    let r2 = m[2].xyz;
+    let t = m[3].xyz;
+
+    let r_inv = mat3x3<f32>(
+        vec3<f32>(r0.x, r1.x, r2.x),
+        vec3<f32>(r0.y, r1.y, r2.y),
+        vec3<f32>(r0.z, r1.z, r2.z)
+    );
+
+    let t_inv = -r_inv * t;
+
+    return mat4x4<f32>(
+        vec4<f32>(r_inv[0], 0.0),
+        vec4<f32>(r_inv[1], 0.0),
+        vec4<f32>(r_inv[2], 0.0),
+        vec4<f32>(t_inv, 1.0)
+    );
+}
+
 // Lower 3D point to 2D UV coordinate
 fn lower(p: vec3<f32>, surf: GpuSurface) -> vec2<f32> {
     let p_ = vec4<f32>(p, 1.0);
@@ -52,12 +74,12 @@ fn lower(p: vec3<f32>, surf: GpuSurface) -> vec2<f32> {
         }
         case SURFACE_TYPE_SPHERE: {
             // mat_i is constructed in prepare to be a reasonable basis
-            let p_local = (surf.mat_i * p_).xyz() / surf.radius;
-            let r = length(p_local.yz());
+            let p_local = (surf.mat_i * p_).xyz / surf.radius;
+            let r = length(p_local.yz);
 
             // Angle from 0 to PI
             let angle = atan2(r, p_local.x);
-            let yz = p_local.yz();
+            let yz = p_local.yz;
             if (length(yz) < EPSILON) {
                 return yz;
             } else {
@@ -65,7 +87,7 @@ fn lower(p: vec3<f32>, surf: GpuSurface) -> vec2<f32> {
             }
         }
         case SURFACE_TYPE_TORUS: {
-            let p_local = (surf.mat_i * p_).xyz();
+            let p_local = (surf.mat_i * p_).xyz;
             let major_angle = atan2(p_local.y, p_local.z);
 
             // Rotate the point so that it's got Y = 0, so we can calculate
@@ -73,7 +95,7 @@ fn lower(p: vec3<f32>, surf: GpuSurface) -> vec2<f32> {
             let z = vec3<f32>(0.0, sin(major_angle), cos(major_angle));
             let z_world = vec3<f32>(z.x, surf.major_radius * z.y, surf.major_radius * z.z);
             let new_mat = make_rigid_transform(z, vec3<f32>(1.0, 0.0, 0.0), z_world);
-            let new_mat_i = inverse(new_mat);
+            let new_mat_i = rigid_inverse(new_mat);
             let new_p = new_mat_i * vec4<f32>(p_local, 1.0);
 
             let minor_angle = atan2(new_p.x, new_p.z);
@@ -101,13 +123,13 @@ fn normal(p: vec3<f32>, uv: vec2<f32>, surf: GpuSurface) -> vec3<f32> {
         case SURFACE_TYPE_CONE: {
             // Project into CONE SPACE
             let pos = surf.mat_i * vec4<f32>(p, 1.0);
-            var xy = normalize(pos.xy());
-            if (length(pos.xy()) < EPSILON) {
+            var xy = normalize(pos.xy);
+            if (length(pos.xy) < EPSILON) {
                 return vec3<f32>(0.0, 0.0, 0.0);
             }
             let normal = vec4<f32>(xy.x * cos(surf.angle), xy.y * cos(surf.angle), -sin(surf.angle), 0.0);
             // Deproject back into world space
-            return normalize((surf.mat * normal).xyz());
+            return normalize((surf.mat * normal).xyz);
         }
         case SURFACE_TYPE_SPHERE: {
             return normalize(p - surf.location);
@@ -117,16 +139,16 @@ fn normal(p: vec3<f32>, uv: vec2<f32>, surf: GpuSurface) -> vec3<f32> {
             let proj = surf.mat_i * vec4<f32>(p, 1.0);
             // Then the normal is just pointing along that direction
             let norm = normalize(vec3<f32>(proj.x, proj.y, 0.0));
-            return normalize((surf.mat * vec4<f32>(norm, 0.0)).xyz());
+            return normalize((surf.mat * vec4<f32>(norm, 0.0)).xyz);
         }
         case SURFACE_TYPE_TORUS: {
-            let p_local = (surf.mat_i * vec4<f32>(p, 1.0)).xyz();
+            let p_local = (surf.mat_i * vec4<f32>(p, 1.0)).xyz;
             let major_angle = atan2(p_local.y, p_local.z);
 
             let z = vec3<f32>(0.0, sin(major_angle), cos(major_angle)) * surf.major_radius;
             let norm = normalize(p_local - z);
 
-            return normalize((surf.mat * vec4<f32>(norm, 0.0)).xyz());
+            return normalize((surf.mat * vec4<f32>(norm, 0.0)).xyz);
         }
         // For BSpline and NURBS, we'll need to implement additional logic
         default: {
@@ -138,6 +160,9 @@ fn normal(p: vec3<f32>, uv: vec2<f32>, surf: GpuSurface) -> vec3<f32> {
 // Raise 2D UV coordinate back to 3D point
 fn raise(uv: vec2<f32>, surf: GpuSurface) -> vec3<f32> {
     switch surf.surface_type {
+        case SURFACE_TYPE_PLANE: {
+            return (surf.mat * vec4<f32>(uv, 0.0, 1.0)).xyz;
+        }
         case SURFACE_TYPE_SPHERE: {
             let angle = length(uv);
             if (angle > PI) {
@@ -152,7 +177,7 @@ fn raise(uv: vec2<f32>, surf: GpuSurface) -> vec3<f32> {
                 pos = vec3<f32>(x, yz.x, yz.y);
             }
             pos = pos * surf.radius;
-            return (surf.mat * vec4<f32>(pos, 1.0)).xyz();
+            return (surf.mat * vec4<f32>(pos, 1.0)).xyz;
         }
         // For BSpline and NURBS, we'll implement more complex logic or handle on CPU
         default: {
@@ -163,7 +188,7 @@ fn raise(uv: vec2<f32>, surf: GpuSurface) -> vec3<f32> {
 
 // Helper function to create a rigid transform matrix
 fn make_rigid_transform(z_world: vec3<f32>, x_world: vec3<f32>, origin_world: vec3<f32>) -> mat4x4<f32> {
-    var mat = mat4x4<f32>(1.0);
+    var mat: mat4x4<f32>;
     mat[0] = vec4<f32>(x_world, 0.0);
     mat[1] = vec4<f32>(cross(z_world, x_world), 0.0);
     mat[2] = vec4<f32>(z_world, 0.0);

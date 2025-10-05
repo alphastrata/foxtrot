@@ -18,15 +18,16 @@ pollster = { workspace = true, optional = true }
 bytemuck = { workspace = true, optional = true }
 
 
-[features]
-parallel = ["rayon", "step/parallel", "dep:nalgebra"]
-wgpu = ["dep:wgpu", "dep:pollster", "dep:bytemuck", "parallel"]
 
 [dev-dependencies]
-clap = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
 criterion = { workspace = true, features = ["html_reports"] }
 env_logger = { workspace = true }
 
+[features]
+parallel = ["rayon", "step/parallel", "dep:nalgebra"]
+wgpu = ["dep:wgpu", "dep:pollster", "dep:bytemuck", "parallel"]
+test = ["wgpu", "rayon"]
 
 [[bench]]
 name = 'triangulation_benchmark'

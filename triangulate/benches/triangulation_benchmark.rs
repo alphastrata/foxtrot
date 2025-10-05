@@ -29,16 +29,16 @@ fn benchmark_triangulate(c: &mut Criterion) {
             #[cfg(feature = "rayon")]
             {
                 let mut group = c.benchmark_group("triangulators");
-                // group.bench_function("triangulate-original", |b| {
-                //     b.iter(|| {
-                //         _ = triangulate::triangulate(&step_file);
-                //     });
-                // });
-                // group.bench_function("triangulate-2", |b| {
-                //     b.iter(|| {
-                //         _ = triangulate::triangulate2(&step_file);
-                //     });
-                // });
+                group.bench_function("triangulate-original", |b| {
+                    b.iter(|| {
+                        _ = triangulate::triangulate(&step_file);
+                    });
+                });
+                group.bench_function("triangulate-2", |b| {
+                    b.iter(|| {
+                        _ = triangulate::triangulate2(&step_file);
+                    });
+                });
                 group.bench_function("triangulate-3", |b| {
                     b.iter(|| {
                         _ = triangulate::triangulate3(&step_file);
@@ -49,16 +49,16 @@ fn benchmark_triangulate(c: &mut Criterion) {
                         _ = triangulate::triangulate4(&step_file);
                     });
                 });
-                // group.bench_function("triangulate-smart-cache", |b| {
-                //     b.iter(|| {
-                //         _ = triangulate::fucking_pythagoras::triangulate5(&step_file);
-                //     });
-                // });
-                // group.bench_function("triangulate-best-of-all", |b| {
-                //     b.iter(|| {
-                //         _ = triangulate::fucking_pythagoras::triangulate6(&step_file);
-                //     });
-                // });
+                group.bench_function("triangulate-smart-cache", |b| {
+                    b.iter(|| {
+                        _ = triangulate::fucking_pythagoras::triangulate5(&step_file);
+                    });
+                });
+                group.bench_function("triangulate-best-of-all", |b| {
+                    b.iter(|| {
+                        _ = triangulate::fucking_pythagoras::triangulate6(&step_file);
+                    });
+                });
                 group.bench_function("triangulate-wgpu", |b| {
                     b.iter(|| {
                         _ = triangulate::wgpu_triangulate(&step_file);
