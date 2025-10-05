@@ -70,7 +70,7 @@ fn benchmark_triangulate(c: &mut Criterion) {
                 group.finish();
             }
         } else {
-            warn("Warning: STEP file is empty, benchmarking will not be meaningful");
+            warn!("Warning: STEP file is empty, benchmarking will not be meaningful");
         }
     }
 }
