@@ -5,8 +5,8 @@ authors = ["jer<alphastrata@gmail.com>"]
 edition = "2024"
 
 [dependencies]
-step = { path = "../step", features = ["parallel"] }
-triangulate = { path = "../triangulate", features = ["parallel", "wgpu"] }
+step = { path = "../step", features = ["rayon"] }
+triangulate = { path = "../triangulate", features = ["rayon", "wgpu"] }
 clap = { workspace = true, features = ["derive"] }
 env_logger = { workspace = true }
 itertools = { workspace = true }

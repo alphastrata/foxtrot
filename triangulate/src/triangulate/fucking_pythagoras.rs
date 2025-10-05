@@ -1,5 +1,5 @@
 use super::*;
-use std::collections::HashMap;
+use ahash::AHashMap;
 use std::convert::TryInto;
 
 use glm::{DMat4, DVec3, DVec4, U32Vec3};
@@ -24,13 +24,13 @@ use step::{
 struct EntityCache<'a> {
     step_file: &'a StepFile<'a>,
     // Cache commonly accessed entity types
-    cartesian_points: HashMap<Id<CartesianPoint_<'a>>, DVec3>,
-    directions: HashMap<Id<Direction_<'a>>, DVec3>,
-    axis2_placements: HashMap<Id<Axis2Placement3d_<'a>>, (DVec3, DVec3, DVec3)>,
-    surfaces: HashMap<Id<Surface_<'a>>, Surface>,
-    oriented_edges: HashMap<Id<OrientedEdge_<'a>>, &'a OrientedEdge_<'a>>,
-    edge_curves: HashMap<Id<EdgeCurve_<'a>>, &'a EdgeCurve_<'a>>,
-    vertex_points: HashMap<Id<VertexPoint_<'a>>, DVec3>,
+    cartesian_points: AHashMap<Id<CartesianPoint_<'a>>, DVec3>,
+    directions: AHashMap<Id<Direction_<'a>>, DVec3>,
+    axis2_placements: AHashMap<Id<Axis2Placement3d_<'a>>, (DVec3, DVec3, DVec3)>,
+    surfaces: AHashMap<Id<Surface_<'a>>, Surface>,
+    oriented_edges: AHashMap<Id<OrientedEdge_<'a>>, &'a OrientedEdge_<'a>>,
+    edge_curves: AHashMap<Id<EdgeCurve_<'a>>, &'a EdgeCurve_<'a>>,
+    vertex_points: AHashMap<Id<VertexPoint_<'a>>, DVec3>,
 }
 
 impl<'a> EntityCache<'a> {
@@ -38,13 +38,13 @@ impl<'a> EntityCache<'a> {
         // Pre-populate common lookups
         let mut cache = EntityCache {
             step_file: s,
-            cartesian_points: HashMap::new(),
-            directions: HashMap::new(),
-            axis2_placements: HashMap::new(),
-            surfaces: HashMap::new(),
-            oriented_edges: HashMap::new(),
-            edge_curves: HashMap::new(),
-            vertex_points: HashMap::new(),
+            cartesian_points: AHashMap::new(),
+            directions: AHashMap::new(),
+            axis2_placements: AHashMap::new(),
+            surfaces: AHashMap::new(),
+            oriented_edges: AHashMap::new(),
+            edge_curves: AHashMap::new(),
+            vertex_points: AHashMap::new(),
         };
 
         // Build lookup tables by scanning once
@@ -289,8 +289,8 @@ impl<'a> EntityCache<'a> {
             step_file: self.step_file,
             cartesian_points: self.cartesian_points.clone(),
             directions: self.directions.clone(),
-            axis2_placements: HashMap::new(), // Start with empty cache - will be populated as needed
-            surfaces: HashMap::new(), // Start with empty cache - will be populated as needed
+            axis2_placements: AHashMap::new(), // Start with empty cache - will be populated as needed
+            surfaces: AHashMap::new(), // Start with empty cache - will be populated as needed
             oriented_edges: self.oriented_edges.clone(),
             edge_curves: self.edge_curves.clone(),
             vertex_points: self.vertex_points.clone(),
@@ -415,7 +415,7 @@ pub fn triangulate5(s: &StepFile) -> (Mesh, Stats) {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     // ... (same setup as triangulate4 for colors, transforms, etc)
-    let brep_colors: HashMap<_, DVec3> =
+    let brep_colors: AHashMap<_, DVec3> =
         s.0.iter()
             .filter_map(MechanicalDesignGeometricPresentationRepresentation_::try_from_entity)
             .flat_map(|m| m.items.iter())
@@ -437,7 +437,7 @@ pub fn triangulate5(s: &StepFile) -> (Mesh, Stats) {
     }
 
     let mut todo: Vec<_> = roots.into_iter().map(|v| (v, DMat4::identity())).collect();
-    let mut shape_rep_relationship: HashMap<Id<_>, Vec<Id<_>>> = HashMap::new();
+    let mut shape_rep_relationship: AHashMap<Id<_>, Vec<Id<_>>> = AHashMap::new();
     for (r1, r2) in
         s.0.iter()
             .filter_map(ShapeRepresentationRelationship_::try_from_entity)
@@ -446,7 +446,7 @@ pub fn triangulate5(s: &StepFile) -> (Mesh, Stats) {
         shape_rep_relationship.entry(r1).or_default().push(r2);
     }
 
-    let mut to_mesh: HashMap<Id<_>, Vec<DMat4>> = HashMap::new();
+    let mut to_mesh: AHashMap<Id<_>, Vec<DMat4>> = AHashMap::new();
     while let Some((id, mat)) = todo.pop() {
         for child in shape_rep_relationship.get(&id).unwrap_or(&vec![]) {
             todo.push((*child, mat));
@@ -659,7 +659,7 @@ pub fn triangulate6(s: &StepFile) -> (Mesh, Stats) {
     let entity_cache = EntityCache::new(s);
 
     // ... (same setup as triangulate4 for colors, transforms, etc)
-    let brep_colors: HashMap<_, DVec3> =
+    let brep_colors: AHashMap<_, DVec3> =
         s.0.iter()
             .filter_map(MechanicalDesignGeometricPresentationRepresentation_::try_from_entity)
             .flat_map(|m| m.items.iter())
@@ -681,7 +681,7 @@ pub fn triangulate6(s: &StepFile) -> (Mesh, Stats) {
     }
 
     let mut todo: Vec<_> = roots.into_iter().map(|v| (v, DMat4::identity())).collect();
-    let mut shape_rep_relationship: HashMap<Id<_>, Vec<Id<_>>> = HashMap::new();
+    let mut shape_rep_relationship: AHashMap<Id<_>, Vec<Id<_>>> = AHashMap::new();
     for (r1, r2) in
         s.0.iter()
             .filter_map(ShapeRepresentationRelationship_::try_from_entity)
@@ -690,7 +690,7 @@ pub fn triangulate6(s: &StepFile) -> (Mesh, Stats) {
         shape_rep_relationship.entry(r1).or_default().push(r2);
     }
 
-    let mut to_mesh: HashMap<Id<_>, Vec<DMat4>> = HashMap::new();
+    let mut to_mesh: AHashMap<Id<_>, Vec<DMat4>> = AHashMap::new();
     while let Some((id, mat)) = todo.pop() {
         for child in shape_rep_relationship.get(&id).unwrap_or(&vec![]) {
             todo.push((*child, mat));

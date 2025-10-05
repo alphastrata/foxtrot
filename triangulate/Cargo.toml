@@ -16,6 +16,7 @@ rayon = { workspace = true, optional = true }
 wgpu = { workspace = true, optional = true }
 pollster = { workspace = true, optional = true }
 bytemuck = { workspace = true, optional = true }
+ahash = { workspace = true }
 
 
 
@@ -25,11 +26,11 @@ criterion = { workspace = true, features = ["html_reports"] }
 env_logger = { workspace = true }
 
 [features]
-parallel = ["rayon", "step/parallel", "dep:nalgebra"]
-wgpu = ["dep:wgpu", "dep:pollster", "dep:bytemuck", "parallel"]
+rayon = ["dep:rayon", "step/rayon", "dep:nalgebra"]
+wgpu = ["dep:wgpu", "dep:pollster", "dep:bytemuck", "rayon"]
 test = ["wgpu", "rayon"]
 
 [[bench]]
 name = 'triangulation_benchmark'
 harness = false
-required-features = ["parallel", "wgpu"]
+required-features = ["rayon", "wgpu"]

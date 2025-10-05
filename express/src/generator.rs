@@ -1,5 +1,6 @@
 use crate::parse::*;
-use std::collections::{HashMap, HashSet};
+use ahash::AHashMap;
+use std::collections::HashSet;
 use std::fmt::Write;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -24,7 +25,7 @@ enum Type<'a> {
     // Direct Rust type
     Primitive(&'a str),
 }
-struct TypeMap<'a>(HashMap<&'a str, Type<'a>>, &'a HashMap<&'a str, Ref<'a>>);
+struct TypeMap<'a>(AHashMap<&'a str, Type<'a>>, &'a AHashMap<&'a str, Ref<'a>>);
 impl<'a> TypeMap<'a> {
     fn to_rtype_build(&mut self, s: &'a str) -> String {
         if !self.0.contains_key(s) {
@@ -516,11 +517,11 @@ pub fn generator(s: &mut Syntax) -> Result<String, std::fmt::Error> {
 
     // From this point on, `s` is becomes immutable.  We build a map from type
     // names (in camel_case) to references into `s`, for ease of access.
-    let mut ref_map = HashMap::new();
+    let mut ref_map = AHashMap::new();
     s.build_ref_map(&mut ref_map);
 
     // Finally, we can build out the type map
-    let mut type_map = TypeMap(HashMap::new(), &ref_map);
+    let mut type_map = TypeMap(AHashMap::new(), &ref_map);
     type_map.0.insert("usize", Type::Primitive("usize"));
     type_map.0.insert("bool", Type::Primitive("bool"));
     type_map.0.insert("i64", Type::Primitive("i64"));
@@ -672,7 +673,7 @@ impl<'a> Syntax<'a> {
             v.collect_entity_names(entity_names);
         }
     }
-    fn build_ref_map(&'a self, ref_map: &mut HashMap<&'a str, Ref<'a>>) {
+    fn build_ref_map(&'a self, ref_map: &mut AHashMap<&'a str, Ref<'a>>) {
         for v in &self.0 {
             v.build_ref_map(ref_map);
         }
@@ -687,7 +688,7 @@ impl<'a> SchemaDecl<'a> {
     fn collect_entity_names(&self, entity_names: &mut HashSet<&'a str>) {
         self.body.collect_entity_names(entity_names);
     }
-    fn build_ref_map(&'a self, ref_map: &mut HashMap<&'a str, Ref<'a>>) {
+    fn build_ref_map(&'a self, ref_map: &mut AHashMap<&'a str, Ref<'a>>) {
         self.body.build_ref_map(ref_map);
     }
     fn disambiguate(&mut self, entity_names: &HashSet<&str>) {
@@ -703,7 +704,7 @@ impl<'a> SchemaBody<'a> {
             }
         }
     }
-    fn build_ref_map(&'a self, ref_map: &mut HashMap<&'a str, Ref<'a>>) {
+    fn build_ref_map(&'a self, ref_map: &mut AHashMap<&'a str, Ref<'a>>) {
         for d in &self.declarations {
             match d {
                 DeclarationOrRuleDecl::Declaration(d) => d.build_ref_map(ref_map),
@@ -731,7 +732,7 @@ impl<'a> Declaration<'a> {
             d.disambiguate(entity_names);
         }
     }
-    fn build_ref_map(&'a self, ref_map: &mut HashMap<&'a str, Ref<'a>>) {
+    fn build_ref_map(&'a self, ref_map: &mut AHashMap<&'a str, Ref<'a>>) {
         match self {
             Declaration::Entity(d) => {
                 ref_map.insert(d.0.0.0, Ref::Entity(d));
@@ -910,7 +911,7 @@ impl<'a> EntityDecl<'a> {
         // Tag any inherited attribute names with > 1 occurence so we can
         // special-case them in the struct
         let subsuper = &self.0.1;
-        let mut inherited_name_count: HashMap<&str, usize> = HashMap::new();
+        let mut inherited_name_count: AHashMap<&str, usize> = AHashMap::new();
         if let Some(subs) = &subsuper.1 {
             for sub in &subs.0 {
                 for a in type_map.attributes(sub.0) {

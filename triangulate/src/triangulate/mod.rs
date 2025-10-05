@@ -1,4 +1,5 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
+use ahash::AHashMap;
 use std::convert::TryInto;
 
 use glm::{DMat4, DVec3, DVec4, U32Vec3};
@@ -40,10 +41,10 @@ pub struct FaceTask<'a> {
 }
 
 /// `TransformStack` is a mapping of representations to transformed children.
-type TransformStack<'a> = HashMap<Representation<'a>, Vec<(Representation<'a>, DMat4)>>;
+type TransformStack<'a> = AHashMap<Representation<'a>, Vec<(Representation<'a>, DMat4)>>;
 fn build_transform_stack<'a>(s: &'a StepFile, flip: bool) -> TransformStack<'a> {
     // Store a map of parent -> (child, transform)
-    let mut transform_stack: HashMap<_, Vec<_>> = HashMap::new();
+    let mut transform_stack: AHashMap<_, Vec<_>> = AHashMap::new();
     for r in
         s.0.iter()
             .filter_map(RepresentationRelationshipWithTransformation_::try_from_entity)
@@ -86,7 +87,7 @@ pub fn triangulate(s: &StepFile) -> (Mesh, Stats) {
             .filter_map(|item| s.entity(item.cast::<StyledItem_>()))
             .collect();
 
-    let brep_colors: HashMap<_, DVec3> = styled_items
+    let brep_colors: AHashMap<_, DVec3> = styled_items
         .iter()
         .filter_map(|styled| {
             if styled.styles.len() != 1 {
@@ -116,7 +117,7 @@ pub fn triangulate(s: &StepFile) -> (Mesh, Stats) {
 
     // Store a map of ShapeRepresentationRelationships, which some models
     // use to map from axes to specific instances
-    let mut shape_rep_relationship: HashMap<Id<_>, Vec<Id<_>>> = HashMap::new();
+    let mut shape_rep_relationship: AHashMap<Id<_>, Vec<Id<_>>> = AHashMap::new();
     for (r1, r2) in
         s.0.iter()
             .filter_map(ShapeRepresentationRelationship_::try_from_entity)
@@ -125,7 +126,7 @@ pub fn triangulate(s: &StepFile) -> (Mesh, Stats) {
         shape_rep_relationship.entry(r1).or_default().push(r2);
     }
 
-    let mut to_mesh: HashMap<Id<_>, Vec<_>> = HashMap::new();
+    let mut to_mesh: AHashMap<Id<_>, Vec<_>> = AHashMap::new();
     while let Some((id, mat)) = todo.pop() {
         for child in shape_rep_relationship.get(&id).unwrap_or(&vec![]) {
             todo.push((*child, mat));
@@ -860,7 +861,7 @@ pub fn triangulate2(s: &StepFile) -> (Mesh, Stats) {
             .filter_map(|item| s.entity(item.cast::<StyledItem_>()))
             .collect();
 
-    let brep_colors: HashMap<_, Vector3<f64>> = styled_items
+    let brep_colors: AHashMap<_, Vector3<f64>> = styled_items
         .iter()
         .filter_map(|styled| {
             if styled.styles.len() != 1 {
@@ -886,7 +887,7 @@ pub fn triangulate2(s: &StepFile) -> (Mesh, Stats) {
         warn!("Transformation stack has more than one root!");
     }
 
-    let mut shape_rep_relationship: HashMap<Id<_>, Vec<Id<_>>> = HashMap::new();
+    let mut shape_rep_relationship: AHashMap<Id<_>, Vec<Id<_>>> = AHashMap::new();
     for (r1, r2) in
         s.0.iter()
             .filter_map(ShapeRepresentationRelationship_::try_from_entity)
@@ -895,7 +896,7 @@ pub fn triangulate2(s: &StepFile) -> (Mesh, Stats) {
         shape_rep_relationship.entry(r1).or_default().push(r2);
     }
 
-    let mut to_mesh: HashMap<Id<_>, Vec<_>> = HashMap::new();
+    let mut to_mesh: AHashMap<Id<_>, Vec<_>> = AHashMap::new();
     while let Some((id, mat)) = todo.pop() {
         for child in shape_rep_relationship.get(&id).unwrap_or(&vec![]) {
             todo.push((*child, mat));
@@ -936,19 +937,21 @@ pub fn triangulate2(s: &StepFile) -> (Mesh, Stats) {
             .for_each(|i| to_mesh.entry(i).or_default().push(Matrix4::identity()));
     }
 
+        // Use proper conditional compilation for rayon/non-rayon support
+    #[cfg(feature = "rayon")]
     let (mesh, stats) = to_mesh
-        .into_par_iter()
+        .par_iter()
         .map(|(id, mats)| {
             let mut local_mesh = Mesh::default();
             let mut local_stats = Stats::default();
 
             let color = brep_colors
-                .get(&id)
+                .get(id)
                 .copied()
                 .unwrap_or(Vector3::new(0.5, 0.5, 0.5));
 
             let mut template_mesh = Mesh::default();
-            match &s[id] {
+            match &s[**id] {
                 Entity::ManifoldSolidBrep(b) => {
                     closed_shell(s, b.outer, &mut template_mesh, &mut local_stats);
                 }
@@ -979,12 +982,12 @@ pub fn triangulate2(s: &StepFile) -> (Mesh, Stats) {
                     }
                 }
                 _ => {
-                    warn!("Skipping {:?} (not a known solid)", s[id]);
+                    warn!("Skipping {:?} (not a known solid)", s[**id]);
                     return (local_mesh, local_stats);
                 }
             };
 
-            for mat in mats {
+            for mat in mats.iter() {
                 let v_offset = local_mesh
                     .verts
                     .len()
@@ -1018,6 +1021,89 @@ pub fn triangulate2(s: &StepFile) -> (Mesh, Stats) {
                 )
             },
         );
+    #[cfg(not(feature = "rayon"))]
+    let (mesh, stats) = to_mesh
+        .iter()
+        .map(|(id, mats)| {
+            let mut local_mesh = Mesh::default();
+            let mut local_stats = Stats::default();
+
+            let color = brep_colors
+                .get(id)
+                .copied()
+                .unwrap_or(Vector3::new(0.5, 0.5, 0.5));
+
+            let mut template_mesh = Mesh::default();
+            match &s[**id] {
+                Entity::ManifoldSolidBrep(b) => {
+                    closed_shell(s, b.outer, &mut template_mesh, &mut local_stats);
+                }
+                Entity::ShellBasedSurfaceModel(b) => {
+                    for v in &b.sbsm_boundary {
+                        shell(s, *v, &mut template_mesh, &mut local_stats);
+                    }
+                }
+                Entity::BrepWithVoids(b) => {
+                    closed_shell(s, b.outer, &mut template_mesh, &mut local_stats);
+
+                    for void_shell_id in &b.voids {
+                        let oriented_shell = s.entity(*void_shell_id).unwrap();
+                        let mut void_mesh = Mesh::default();
+                        closed_shell(
+                            s,
+                            oriented_shell.closed_shell_element,
+                            &mut void_mesh,
+                            &mut local_stats,
+                        );
+
+                        if !oriented_shell.orientation {
+                            for tri in void_mesh.triangles.iter_mut() {
+                                tri.verts.swap_rows(1, 2);
+                            }
+                        }
+                        template_mesh = Mesh::combine(template_mesh, void_mesh);
+                    }
+                }
+                _ => {
+                    warn!("Skipping {:?} (not a known solid)", s[**id]);
+                    return (local_mesh, local_stats);
+                }
+            };
+
+            for mat in mats.iter() {
+                let v_offset = local_mesh
+                    .verts
+                    .len()
+                    .try_into()
+                    .expect("too many triangles");
+
+                for v in &template_mesh.verts {
+                    let p_h = Vector4::new(v.pos.x, v.pos.y, v.pos.z, 1.0);
+                    let pos = (mat * p_h).xyz();
+
+                    let n_h = Vector4::new(v.norm.x, v.norm.y, v.norm.z, 0.0);
+                    let norm = (mat * n_h).xyz().normalize();
+
+                    local_mesh.verts.push(mesh::Vertex { pos, norm, color });
+                }
+
+                for t in &template_mesh.triangles {
+                    let mut new_tri = *t;
+                    new_tri.verts.add_scalar_mut(v_offset);
+                    local_mesh.triangles.push(new_tri);
+                }
+            }
+            (local_mesh, local_stats)
+        })
+        .fold(
+            (Mesh::default(), Stats::default()),
+            |(mesh_a, stats_a), (mesh_b, stats_b)| {
+                (
+                    Mesh::combine(mesh_a, mesh_b),
+                    Stats::combine(stats_a, stats_b),
+                )
+            },
+        );
 
     info!("num_shells: {}", stats.num_shells);
     info!("num_faces: {}", stats.num_faces);
@@ -1040,7 +1126,7 @@ pub fn triangulate3(s: &StepFile) -> (Mesh, Stats) {
             .filter_map(|item| s.entity(item.cast::<StyledItem_>()))
             .collect();
 
-    let brep_colors: HashMap<_, Vector3<f64>> = styled_items
+    let brep_colors: AHashMap<_, Vector3<f64>> = styled_items
         .iter()
         .filter_map(|styled| {
             if styled.styles.len() != 1 {
@@ -1067,7 +1153,7 @@ pub fn triangulate3(s: &StepFile) -> (Mesh, Stats) {
         warn!("Transformation stack has more than one root!");
     }
 
-    let mut shape_rep_relationship: HashMap<Id<_>, Vec<Id<_>>> = HashMap::new();
+    let mut shape_rep_relationship: AHashMap<Id<_>, Vec<Id<_>>> = AHashMap::new();
     for (r1, r2) in
         s.0.iter()
             .filter_map(ShapeRepresentationRelationship_::try_from_entity)
@@ -1076,7 +1162,7 @@ pub fn triangulate3(s: &StepFile) -> (Mesh, Stats) {
         shape_rep_relationship.entry(r1).or_default().push(r2);
     }
 
-    let mut to_mesh: HashMap<Id<_>, Vec<_>> = HashMap::new();
+    let mut to_mesh: AHashMap<Id<_>, Vec<_>> = AHashMap::new();
     while let Some((id, mat)) = todo.pop() {
         for child in shape_rep_relationship.get(&id).unwrap_or(&vec![]) {
             todo.push((*child, mat));
@@ -1350,7 +1436,7 @@ pub fn triangulate4(s: &StepFile) -> (Mesh, Stats) {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     // Phase 1: Build face catalog with minimal allocations
-    let brep_colors: HashMap<_, DVec3> =
+    let brep_colors: AHashMap<_, DVec3> =
         s.0.iter()
             .filter_map(MechanicalDesignGeometricPresentationRepresentation_::try_from_entity)
             .flat_map(|m| m.items.iter())
@@ -1372,7 +1458,7 @@ pub fn triangulate4(s: &StepFile) -> (Mesh, Stats) {
     }
 
     let mut todo: Vec<_> = roots.into_iter().map(|v| (v, DMat4::identity())).collect();
-    let mut shape_rep_relationship: HashMap<Id<_>, Vec<Id<_>>> = HashMap::new();
+    let mut shape_rep_relationship: AHashMap<Id<_>, Vec<Id<_>>> = AHashMap::new();
     for (r1, r2) in
         s.0.iter()
             .filter_map(ShapeRepresentationRelationship_::try_from_entity)
@@ -1381,7 +1467,7 @@ pub fn triangulate4(s: &StepFile) -> (Mesh, Stats) {
         shape_rep_relationship.entry(r1).or_default().push(r2);
     }
 
-    let mut to_mesh: HashMap<Id<_>, Vec<DMat4>> = HashMap::new();
+    let mut to_mesh: AHashMap<Id<_>, Vec<DMat4>> = AHashMap::new();
     while let Some((id, mat)) = todo.pop() {
         for child in shape_rep_relationship.get(&id).unwrap_or(&vec![]) {
             todo.push((*child, mat));
@@ -1658,7 +1744,7 @@ fn triangulate_single_face(
 #[cfg(feature = "wgpu")]
 pub fn wgpu_triangulate(s: &StepFile) -> (Mesh, Stats) {
     // Phase 1: Build face catalog with minimal allocations
-    let brep_colors: HashMap<_, DVec3> =
+    let brep_colors: AHashMap<_, DVec3> =
         s.0.iter()
             .filter_map(MechanicalDesignGeometricPresentationRepresentation_::try_from_entity)
             .flat_map(|m| m.items.iter())
@@ -1680,7 +1766,7 @@ pub fn wgpu_triangulate(s: &StepFile) -> (Mesh, Stats) {
     }
 
     let mut todo: Vec<_> = roots.into_iter().map(|v| (v, DMat4::identity())).collect();
-    let mut shape_rep_relationship: HashMap<Id<_>, Vec<Id<_>>> = HashMap::new();
+    let mut shape_rep_relationship: AHashMap<Id<_>, Vec<Id<_>>> = AHashMap::new();
     for (r1, r2) in
         s.0.iter()
             .filter_map(ShapeRepresentationRelationship_::try_from_entity)
@@ -1689,7 +1775,7 @@ pub fn wgpu_triangulate(s: &StepFile) -> (Mesh, Stats) {
         shape_rep_relationship.entry(r1).or_default().push(r2);
     }
 
-    let mut to_mesh: HashMap<Id<_>, Vec<DMat4>> = HashMap::new();
+    let mut to_mesh: AHashMap<Id<_>, Vec<DMat4>> = AHashMap::new();
     while let Some((id, mat)) = todo.pop() {
         for child in shape_rep_relationship.get(&id).unwrap_or(&vec![]) {
             todo.push((*child, mat));

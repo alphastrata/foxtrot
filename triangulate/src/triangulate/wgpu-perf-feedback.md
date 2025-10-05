@@ -100,7 +100,8 @@ Move CDT triangulation to GPU instead of doing it on CPU:
 - Only transfer final triangle indices back
 
 **Complexity**: High. CDT is complex. Consider using existing GPU libraries like:
-- `delaunator` (port to WGSL)
+- `delaunator` (port to WGSL), `git clone https://github.com/mourner/delaunator-rs` we could try it out on cpu first then do a wgpu version for the learning! we should defnitely borrow their tests, data, and fixtures.
+
 - Or keep CPU triangulation but batch it
 
 ### Phase 3: Async Pipelining (Expected: 1.5-2x)
@@ -143,7 +144,7 @@ struct GpuTriangulator {
     output_buffer: Buffer,
     staging_buffer: Buffer,
     // Pre-compiled pipelines
-    lowering_pipeline: ComputePipeline,
+    lowering_pipeline: ComputePipeline, // shader pipeline happens on pipeline creation so we should make the GguTriangulator init them ASAP in the order of things happen, potentially putting it on a bg thread (if we use it in the ./thumbnailer/src/main.rs)
     raising_pipeline: ComputePipeline,
 }
 
@@ -185,6 +186,7 @@ for (surf_type, faces) in faces_by_surface {
     process_batch_with_pipeline(faces, pipeline);
 }
 ```
+NOTE: we keep 'nurbs' on the CPU
 
 **Specialized plane lowering** (most common):
 ```wgsl
@@ -220,17 +222,15 @@ GPU acceleration makes sense when:
 - Focus optimization efforts there instead
 - GPU makes sense for rendering, not necessarily geometry processing with tiny batches
 
-## PollType Fix
-
+## PollType notes for wgpu 27.0.1 that we use!
 ```rust
-// Old (wgpu <27)
+// new (wgpu <27)
 device.poll(wgpu::PollType::Wait { 
     submission_index: None, 
     timeout: None 
 });
 
-// New (wgpu 27+)
-device.poll(wgpu::Maintain::Wait);
-// or
-device.poll(wgpu::Maintain::WaitForSubmissionIndex(index));
+// OLD (wgpu 26)
+device.poll(wgpu::Maintain::Wait); // DO NOT FUCKING USE THIS!
+
 ```
