@@ -9,7 +9,7 @@ use nalgebra_glm as glm;
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
 
-pub mod fucking_pythagoras;
+pub mod cached_triangulation;
 
 #[cfg(feature = "wgpu")]
 pub mod wgpu_impl;
