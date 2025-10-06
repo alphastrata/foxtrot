@@ -11,9 +11,9 @@ log = { workspace = true }
 memchr = { workspace = true }
 nom = { workspace = true }
 rayon = { workspace = true, optional = true }
-ahash = { workspace = true }
 
 [features]
+parallel = ["rayon"]
 rayon = ["dep:rayon"]
 
 [dev-dependencies]

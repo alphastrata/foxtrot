@@ -1,5 +1,4 @@
 use arrayvec::ArrayVec;
-use ahash::AHashMap;
 use memchr::{memchr, memchr3};
 use nom::{
     branch::alt,
@@ -10,7 +9,7 @@ use nom::{
     multi::separated_list0,
     sequence::{delimited, preceded, tuple},
 };
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::{
     ap214::{Entity, superclasses_of},
@@ -230,11 +229,11 @@ pub(crate) fn parse_entity_fallback(s: &[u8]) -> IResult<'_, (usize, Entity<'_>)
 pub(crate) fn parse_complex_mapping(s: &str) -> IResult<'_, Entity<'_>> {
     // We'll maintain a map from sub-entity name to its argument string, then
     // use this map to figure out the tree and construct it.
-    let mut subentities: AHashMap<&str, &str> = AHashMap::new();
+    let mut subentities: HashMap<&str, &str> = HashMap::new();
 
     // Map from sub-entity name to the str slice which contains the name plus
     // the open parens, used for parsing slices
-    let mut name_tags: AHashMap<&str, &str> = AHashMap::new();
+    let mut name_tags: HashMap<&str, &str> = HashMap::new();
     let bstr = s.as_bytes();
     let mut depth = 0;
     let mut index = 0;
