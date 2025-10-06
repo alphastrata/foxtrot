@@ -40,30 +40,121 @@ pub struct FaceTask<'a> {
     flip_normal: bool,
 }
 
-/// `TransformStack` is a mapping of representations to transformed children.
-type TransformStack<'a> = AHashMap<Representation<'a>, Vec<(Representation<'a>, DMat4)>>;
-fn build_transform_stack<'a>(s: &'a StepFile, flip: bool) -> TransformStack<'a> {
-    // Store a map of parent -> (child, transform)
-    let mut transform_stack: AHashMap<_, Vec<_>> = AHashMap::new();
-    for r in
-        s.0.iter()
-            .filter_map(RepresentationRelationshipWithTransformation_::try_from_entity)
-    {
-        let (a, b) = if flip {
-            (r.rep_2, r.rep_1)
-        } else {
-            (r.rep_1, r.rep_2)
-        };
-        let mut mat = item_defined_transformation(s, r.transformation_operator.cast());
-        if flip {
-            mat = mat
-                .try_inverse()
-                .expect("Could not invert transform matrix");
-        }
+/// Truly optimized batched triangulation that processes all faces in a single GPU operation
+/// This addresses the performance issues by eliminating per-face CPU-GPU transfers
+#[cfg(feature = "wgpu")]
+pub fn triangulate5(s: &StepFile) -> (Mesh, Stats) {
+    use rayon::prelude::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
-        transform_stack.entry(b).or_default().push((a, mat));
+    // Phase 1: Build face catalog with minimal allocations
+    let brep_colors: AHashMap<_, DVec3> =
+        s.0.iter()
+            .filter_map(MechanicalDesignGeometricPresentationRepresentation_::try_from_entity)
+            .flat_map(|m| m.items.iter())
+            .filter_map(|item| s.entity(item.cast::<StyledItem_>()))
+            .filter_map(|styled| {
+                if styled.styles.len() == 1 {
+                    presentation_style_color(s, styled.styles[0]).map(|c| (styled.item, c))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+    let mut transform_stack = build_transform_stack(s, false);
+    let mut roots = transform_stack_roots(&transform_stack);
+    if roots.len() > 1 {
+        transform_stack = build_transform_stack(s, true);
+        roots = transform_stack_roots(&transform_stack);
     }
-    transform_stack
+
+    let mut todo: Vec<_> = roots.into_iter().map(|v| (v, DMat4::identity())).collect();
+    let mut shape_rep_relationship: AHashMap<Id<_>, Vec<Id<_>>> = AHashMap::new();
+    for (r1, r2) in
+        s.0.iter()
+            .filter_map(ShapeRepresentationRelationship_::try_from_entity)
+            .map(|e| (e.rep_1, e.rep_2))
+    {
+        shape_rep_relationship.entry(r1).or_default().push(r2);
+    }
+
+    let mut to_mesh: AHashMap<Id<_>, Vec<DMat4>> = AHashMap::new();
+    while let Some((id, mat)) = todo.pop() {
+        for child in shape_rep_relationship.get(&id).unwrap_or(&vec![]) {
+            todo.push((*child, mat));
+        }
+        if let Some(children) = transform_stack.get(&id) {
+            for (child, next_mat) in children {
+                todo.push((*child, mat * next_mat));
+            }
+        } else {
+            let items = match &s[id] {
+                Entity::AdvancedBrepShapeRepresentation(b) => &b.items,
+                Entity::ShapeRepresentation(b) => &b.items,
+                Entity::ManifoldSurfaceShapeRepresentation(b) => &b.items,
+                _ => continue,
+            };
+
+            for m in items.iter() {
+                if matches!(
+                    &s[*m],
+                    Entity::ManifoldSolidBrep(_)
+                        | Entity::BrepWithVoids(_)
+                        | Entity::ShellBasedSurfaceModel(_)
+                ) {
+                    to_mesh.entry(*m).or_default().push(mat);
+                }
+            }
+        }
+    }
+
+    if to_mesh.is_empty() {
+        to_mesh =
+            s.0.iter()
+                .enumerate()
+                .filter(|(_i, e)| {
+                    matches!(
+                        e,
+                        Entity::ManifoldSolidBrep(_)
+                            | Entity::BrepWithVoids(_)
+                            | Entity::ShellBasedSurfaceModel(_)
+                    )
+                })
+                .map(|(i, _)| (Id::new(i), vec![DMat4::identity()]))
+                .collect();
+    }
+
+    // Phase 2: Extract all face IDs with metadata (no deep copies)
+    struct FaceTask {
+        face_id: Id<Face_>,
+        transforms: Vec<DMat4>,
+        color: DVec3,
+        flip_normal: bool,
+    }
+
+    let face_tasks: Vec<FaceTask> = to_mesh
+        .into_iter()
+        .flat_map(|(brep_id, mats)| {
+            let color = brep_colors
+                .get(&brep_id)
+                .copied()
+                .unwrap_or(DVec3::new(0.5, 0.5, 0.5));
+
+            collect_faces_from_brep(s, brep_id)
+                .into_iter()
+                .map(move |(face_id, flip)| FaceTask {
+                    face_id,
+                    transforms: mats.clone(),
+                    color,
+                    flip_normal: flip,
+                })
+        })
+        .collect();
+
+    // Phase 3: Batched GPU triangulation for all faces
+    // This is the key optimization - process all faces in a single GPU operation
+    crate::triangulate::wgpu_impl::gpu_triangulate_batch_optimized(s, &face_tasks)
 }
 
 fn transform_stack_roots<'a>(transform_stack: &TransformStack<'a>) -> Vec<Representation<'a>> {
