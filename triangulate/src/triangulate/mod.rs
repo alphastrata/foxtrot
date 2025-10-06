@@ -31,6 +31,25 @@ use step::{
     step_file::{FromEntity, StepFile},
 };
 
+type TransformStack<'a> = AHashMap<Representation<'a>, Vec<(Representation<'a>, DMat4)>>;
+
+fn build_transform_stack<'a>(s: &'a StepFile, flip: bool) -> TransformStack<'a> {
+    let mut transform_stack: TransformStack<'a> = AHashMap::new();
+    for mapped_item in s.0.iter().filter_map(MappedItem_::try_from_entity) {
+        let mapping_source = s.entity(mapped_item.mapping_source).unwrap();
+        let mat = item_defined_transformation(s, mapping_source.mapping_origin.cast());
+        let (p, c) = (
+            mapping_source.mapped_representation,
+            mapped_item.mapping_target,
+        );        if flip {
+            transform_stack.entry(c.cast()).or_default().push((p.cast(), mat));
+        } else {
+            transform_stack.entry(p.cast()).or_default().push((c.cast(), mat));
+        }
+    }
+    transform_stack
+}
+
 const SAVE_DEBUG_SVGS: bool = false;
 const SAVE_PANIC_SVGS: bool = false;
 pub struct FaceTask<'a> {
