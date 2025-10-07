@@ -1,4 +1,4 @@
-use triangulate::wgpu_triangulate::wgpu_impl;
+use ::triangulate::triangulate::wgpu_impl;
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::fs;
 use step::step_file::StepFile;
@@ -61,10 +61,6 @@ fn benchmark_triangulate(c: &mut Criterion) {
                         _ = triangulate::cached_triangulation::triangulate6(&step_file);
                     });
                 });
-                // NOTE: takes too long 1s/run and it's WRONG so leave commented out pls.
-
-// ...
-
                 group.bench_function("triangulate-wgpu", |b| {
                     b.iter(|| {
                         _ = wgpu_impl::triangulate(&step_file);
