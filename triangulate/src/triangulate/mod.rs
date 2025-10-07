@@ -8,6 +8,8 @@ use nalgebra_glm as glm;
 
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
+#[cfg(feature = "rayon")]
+use rayon::iter::IntoParallelRefIterator;
 
 pub mod cached_triangulation;
 
@@ -33,7 +35,7 @@ use step::{
 
 type TransformStack<'a> = AHashMap<Representation<'a>, Vec<(Representation<'a>, DMat4)>>;
 
-fn build_transform_stack<'a>(s: &'a StepFile, flip: bool) -> TransformStack<'a> {
+pub fn build_transform_stack<'a>(s: &'a StepFile, flip: bool) -> TransformStack<'a> {
     let mut transform_stack: TransformStack<'a> = AHashMap::new();
     for mapped_item in s.0.iter().filter_map(MappedItem_::try_from_entity) {
         let mapping_source = s.entity(mapped_item.mapping_source).unwrap();
@@ -53,18 +55,16 @@ fn build_transform_stack<'a>(s: &'a StepFile, flip: bool) -> TransformStack<'a> 
 const SAVE_DEBUG_SVGS: bool = false;
 const SAVE_PANIC_SVGS: bool = false;
 pub struct FaceTask<'a> {
-    face_id: AdvancedFace<'a>,
-    transforms: Vec<DMat4>,
-    color: DVec3,
-    flip_normal: bool,
+    pub face_id: AdvancedFace<'a>,
+    pub transforms: Vec<DMat4>,
+    pub color: DVec3,
+    pub flip_normal: bool,
 }
 
 /// Truly optimized batched triangulation that processes all faces in a single GPU operation
 /// This addresses the performance issues by eliminating per-face CPU-GPU transfers
 #[cfg(feature = "wgpu")]
 pub fn triangulate5(s: &StepFile) -> (Mesh, Stats) {
-    use rayon::prelude::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
 
     // Phase 1: Build face catalog with minimal allocations
     let brep_colors: AHashMap<_, DVec3> =
@@ -144,15 +144,7 @@ pub fn triangulate5(s: &StepFile) -> (Mesh, Stats) {
                 .collect();
     }
 
-    // Phase 2: Extract all face IDs with metadata (no deep copies)
-    struct FaceTask {
-        face_id: Id<Face_>,
-        transforms: Vec<DMat4>,
-        color: DVec3,
-        flip_normal: bool,
-    }
-
-    let face_tasks: Vec<FaceTask> = to_mesh
+    let face_tasks: Vec<crate::triangulate::FaceTask> = to_mesh
         .into_iter()
         .flat_map(|(brep_id, mats)| {
             let color = brep_colors
@@ -162,7 +154,7 @@ pub fn triangulate5(s: &StepFile) -> (Mesh, Stats) {
 
             collect_faces_from_brep(s, brep_id)
                 .into_iter()
-                .map(move |(face_id, flip)| FaceTask {
+                .map(move |(face_id, flip)| crate::triangulate::FaceTask {
                     face_id,
                     transforms: mats.clone(),
                     color,
@@ -173,10 +165,10 @@ pub fn triangulate5(s: &StepFile) -> (Mesh, Stats) {
 
     // Phase 3: Batched GPU triangulation for all faces
     // This is the key optimization - process all faces in a single GPU operation
-    crate::triangulate::wgpu_impl::gpu_triangulate_batch_optimized(s, &face_tasks)
+    crate::triangulate::wgpu_impl::triangulate_faces(s, &face_tasks)
 }
 
-fn transform_stack_roots<'a>(transform_stack: &TransformStack<'a>) -> Vec<Representation<'a>> {
+pub fn transform_stack_roots<'a>(transform_stack: &TransformStack<'a>) -> Vec<Representation<'a>> {
     let children: HashSet<_> = transform_stack
         .values()
         .flat_map(|v| v.iter())
@@ -399,7 +391,7 @@ fn item_defined_transformation(s: &StepFile, t: Id<ItemDefinedTransformation_>) 
     t2 * t1.try_inverse().expect("Could not invert transform matrix")
 }
 
-fn presentation_style_color(s: &StepFile, p: PresentationStyleAssignment) -> Option<DVec3> {
+pub fn presentation_style_color(s: &StepFile, p: PresentationStyleAssignment) -> Option<DVec3> {
     // AAAAAHHHHH
     s.entity(p)
         .and_then(|p: &PresentationStyleAssignment_| {
@@ -438,12 +430,12 @@ fn presentation_style_color(s: &StepFile, p: PresentationStyleAssignment) -> Opt
         .map(|c| DVec3::new(c.red, c.green, c.blue))
 }
 
-fn cartesian_point(s: &StepFile, a: Id<CartesianPoint_>) -> DVec3 {
+pub fn cartesian_point(s: &StepFile, a: Id<CartesianPoint_>) -> DVec3 {
     let p = s.entity(a).expect("Could not get cartesian point");
     DVec3::new(p.coordinates[0].0, p.coordinates[1].0, p.coordinates[2].0)
 }
 
-fn direction(s: &StepFile, a: Direction) -> DVec3 {
+pub fn direction(s: &StepFile, a: Direction) -> DVec3 {
     let p = s.entity(a).expect("Could not get cartesian point");
     DVec3::new(
         p.direction_ratios[0],
@@ -452,7 +444,7 @@ fn direction(s: &StepFile, a: Direction) -> DVec3 {
     )
 }
 
-fn axis2_placement_3d(s: &StepFile, t: Id<Axis2Placement3d_>) -> (DVec3, DVec3, DVec3) {
+pub fn axis2_placement_3d(s: &StepFile, t: Id<Axis2Placement3d_>) -> (DVec3, DVec3, DVec3) {
     let a = s.entity(t).expect("Could not get Axis2Placement3d");
     let location = cartesian_point(s, a.location);
     // TODO: this doesn't necessarily match the behavior of `build_axes`
@@ -641,7 +633,7 @@ fn advanced_face(
     Ok(())
 }
 
-fn get_surface(s: &StepFile, surf: ap214::Surface) -> Result<Surface, Error> {
+pub fn get_surface(s: &StepFile, surf: ap214::Surface) -> Result<Surface, Error> {
     match &s[surf] {
         Entity::CylindricalSurface(c) => {
             let (location, axis, ref_direction) = axis2_placement_3d(s, c.position);
@@ -786,15 +778,15 @@ fn get_surface(s: &StepFile, surf: ap214::Surface) -> Result<Surface, Error> {
     }
 }
 
-fn control_points_1d(s: &StepFile, row: &Vec<CartesianPoint>) -> Vec<DVec3> {
+pub fn control_points_1d(s: &StepFile, row: &Vec<CartesianPoint>) -> Vec<DVec3> {
     row.iter().map(|p| cartesian_point(s, *p)).collect()
 }
 
-fn control_points_2d(s: &StepFile, rows: &Vec<Vec<CartesianPoint>>) -> Vec<Vec<DVec3>> {
+pub fn control_points_2d(s: &StepFile, rows: &Vec<Vec<CartesianPoint>>) -> Vec<Vec<DVec3>> {
     rows.iter().map(|row| control_points_1d(s, row)).collect()
 }
 
-fn face_bound(s: &StepFile, b: FaceBound) -> Result<Vec<DVec3>, Error> {
+pub fn face_bound(s: &StepFile, b: FaceBound) -> Result<Vec<DVec3>, Error> {
     let (bound, orientation) = match &s[b] {
         Entity::FaceBound(b) => (b.bound, b.orientation),
         Entity::FaceOuterBound(b) => (b.bound, b.orientation),
@@ -817,7 +809,7 @@ fn face_bound(s: &StepFile, b: FaceBound) -> Result<Vec<DVec3>, Error> {
     }
 }
 
-fn edge_loop(s: &StepFile, edge_list: &[OrientedEdge]) -> Result<Vec<DVec3>, Error> {
+pub fn edge_loop(s: &StepFile, edge_list: &[OrientedEdge]) -> Result<Vec<DVec3>, Error> {
     let mut out = Vec::new();
     for (i, e) in edge_list.iter().enumerate() {
         // Remove the last item from the list, since it's the beginning
@@ -832,7 +824,7 @@ fn edge_loop(s: &StepFile, edge_list: &[OrientedEdge]) -> Result<Vec<DVec3>, Err
     Ok(out)
 }
 
-fn edge_curve(s: &StepFile, e: EdgeCurve, orientation: bool) -> Result<Vec<DVec3>, Error> {
+pub fn edge_curve(s: &StepFile, e: EdgeCurve, orientation: bool) -> Result<Vec<DVec3>, Error> {
     let edge_curve = s.entity(e).expect("Could not get EdgeCurve");
     let curve = curve(s, edge_curve, edge_curve.edge_geometry, orientation)?;
 
@@ -846,7 +838,7 @@ fn edge_curve(s: &StepFile, e: EdgeCurve, orientation: bool) -> Result<Vec<DVec3
     Ok(curve.build(u, v))
 }
 
-fn curve(
+pub fn curve(
     s: &StepFile,
     edge_curve: &ap214::EdgeCurve_,
     curve_id: ap214::Curve,
@@ -950,7 +942,7 @@ fn curve(
     })
 }
 
-fn vertex_point(s: &StepFile, v: Vertex) -> DVec3 {
+pub fn vertex_point(s: &StepFile, v: Vertex) -> DVec3 {
     cartesian_point(
         s,
         s.entity(v.cast::<VertexPoint_>())
@@ -963,6 +955,7 @@ fn vertex_point(s: &StepFile, v: Vertex) -> DVec3 {
 #[cfg(feature = "rayon")]
 pub fn triangulate2(s: &StepFile) -> (Mesh, Stats) {
     use nalgebra::{Matrix4, Vector3, Vector4};
+    use rayon::prelude::*;
 
     let styled_items: Vec<_> =
         s.0.iter()
@@ -1438,7 +1431,7 @@ pub fn triangulate3(s: &StepFile) -> (Mesh, Stats) {
 }
 
 // Helper function: triangulate a single face into local mesh
-fn advanced_face_to_mesh(
+pub fn advanced_face_to_mesh(
     s: &StepFile,
     f: AdvancedFace,
     verts: &mut Vec<mesh::Vertex>,
@@ -1725,7 +1718,7 @@ pub fn triangulate4(s: &StepFile) -> (Mesh, Stats) {
 }
 
 // Fast face collection without deep traversal
-fn collect_faces_from_brep<'a>(
+pub fn collect_faces_from_brep<'a>(
     s: &'a StepFile,
     rep_item_id: Id<RepresentationItem_<'a>>,
 ) -> Vec<(AdvancedFace<'a>, bool)> {

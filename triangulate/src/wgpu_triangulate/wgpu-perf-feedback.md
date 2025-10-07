@@ -1,5 +1,19 @@
 ### **Areas for Potential Improvement**
 
+Firstly, we want the wgpu triangulation to be completely snandboxed and standalone, we can use types / functions etc from the wider library but we should **NOT** be editing working on that CPU code which is well tested and working.
+
+We confine our _changes_ to the ./wgpu_triangulate/**/*.rs files.
+
+## get it compiling and working.
+we need to get it 1. compiling and 2. working:
+commit 9e53809eacb9bf6aa4997b9d6427c7f9c793f494
+Author: jer <alphastrata@gmail.com>
+Date:   Sun Oct 5 16:43:12 2025 +1100
+
+    fix: wgpu test passing --perf is horrible...
+> I suggest diffing against this commit to work out where we went so horribly wrong (note that implementation was compiling and running but the output was wrong -- it's still better than the repo is currently!!)
+ 
+
 This section focuses on high-impact changes that could significantly improve the performance and architecture of your triangulation pipeline.
 
 | Issue | File | Approx. Line | Suggestion | Reasoning |

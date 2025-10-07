@@ -52,12 +52,12 @@ fn benchmark_triangulate(c: &mut Criterion) {
                 });
                 group.bench_function("triangulate-5", |b| {
                     b.iter(|| {
-                        _ = triangulate::fucking_pythagoras::triangulate5(&step_file);
+                        _ = triangulate::cached_triangulation::triangulate5(&step_file);
                     });
                 });
                 group.bench_function("triangulate-6", |b| {
                     b.iter(|| {
-                        _ = triangulate::fucking_pythagoras::triangulate6(&step_file);
+                        _ = triangulate::cached_triangulation::triangulate6(&step_file);
                     });
                 });
                 // NOTE: takes too long 1s/run and it's WRONG so leave commented out pls.
@@ -66,6 +66,11 @@ fn benchmark_triangulate(c: &mut Criterion) {
                 //         _ = triangulate::wgpu_triangulate(&step_file);
                 //     });
                 // });
+                group.bench_function("triangulate-wgpu", |b| {
+                    b.iter(|| {
+                        _ = triangulate::wgpu_triangulate::triangulate(&step_file);
+                    });
+                });
 
                 group.finish();
             }
