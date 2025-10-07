@@ -18,13 +18,13 @@ struct GpuOutputVertex {
     pos: vec4<f32>,
     norm: vec4<f32>,
     color: vec4<f32>,
+    _padding: vec4<f32>,
 };
 
 // --- Buffers ---
-@group(0) @binding(0) var<uniform> surface: GpuSurface;
-@group(0) @binding(1) var<storage, read> template_verts: array<GpuTemplateVertex>;
-@group(0) @binding(2) var<storage, read> transforms: array<GpuTransform>;
-@group(0) @binding(3) var<storage, read_write> output_verts: array<GpuOutputVertex>;
+@group(0) @binding(0) var<storage, read> template_verts: array<GpuTemplateVertex>;
+@group(0) @binding(1) var<storage, read> transforms: array<GpuTransform>;
+@group(0) @binding(2) var<storage, read_write> output_verts: array<GpuOutputVertex>;
 
 
 @compute
@@ -54,9 +54,5 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let world_norm = normalize(xform.inverse_transpose * template_v.norm);
 
     // Write the result
-    output_verts[out_idx] = GpuOutputVertex(
-        pos: world_pos,
-        norm: world_norm,
-        color: template_v.color,
-    );
+    output_verts[out_idx] = GpuOutputVertex(world_pos, world_norm, template_v.color, vec4<f32>(0.0, 0.0, 0.0, 0.0));
 }
