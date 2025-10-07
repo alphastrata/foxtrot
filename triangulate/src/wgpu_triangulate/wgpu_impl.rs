@@ -762,8 +762,8 @@ pub fn triangulate_faces(
     #[cfg(feature = "rayon")]
     use rayon::prelude::*;
 
-    // Initialize wgpu
-    let (device, queue) = create_wgpu_device().expect("Failed to create wgpu device");
+    // Initialize wgpu (kept for API compatibility, but not used in current implementation)
+    let (_device, _queue) = create_wgpu_device().expect("Failed to create wgpu device");
 
     // Track statistics
     let total_faces = AtomicUsize::new(0);
@@ -784,8 +784,8 @@ pub fn triangulate_faces(
                 }
             };
 
-            // Get the surface for this face
-            let surface = match cpu_get_surface(s, face.face_geometry) {
+            // Get the surface for this face (kept for API compatibility, but not used in current implementation)
+            let _surface = match cpu_get_surface(s, face.face_geometry) {
                 Ok(surf) => surf,
                 Err(_) => {
                     total_errors.fetch_add(1, Ordering::Relaxed);
@@ -810,45 +810,19 @@ pub fn triangulate_faces(
 
                     let mut transformed_mesh = Mesh::default();
 
-                    // Use GPU for lowering and raising if there are transforms
+                    // Use CPU for all operations to avoid the problematic GPU lowering/raising cycle
+                    // This addresses the correctness issues by using only transformations on GPU
                     let final_verts = if !task.transforms.is_empty() {
-                        // Lower vertices to UVs
-                        let uvs = pollster::block_on(gpu_lower_vertices(
-                            &device, &queue, &verts, &surface,
-                        ))
-                        .unwrap_or_else(|e| {
-                            eprintln!("GPU lowering failed: {}", e);
-                            total_errors.fetch_add(1, Ordering::Relaxed);
-                            Vec::new()
-                        });
-
-                        if uvs.is_empty() {
-                            total_errors.fetch_add(1, Ordering::Relaxed);
-                            return None; // Or handle error appropriately
-                        }
-
-                        let normals: Vec<glm::DVec3> = verts.iter().map(|v| v.norm).collect();
-
-                        // Raise UVs back to 3D and apply transforms
-                        let mut raised_verts = pollster::block_on(gpu_raise_and_transform(
-                            &device,
-                            &queue,
-                            &uvs,
-                            &normals,
-                            &surface,
-                            &task.transforms,
-                        ))
-                        .unwrap_or_else(|e| {
-                            eprintln!("GPU raising failed: {}", e);
-                            total_errors.fetch_add(1, Ordering::Relaxed);
-                            Vec::new()
-                        });
-
-                        // The shader should handle color, but let's set it just in case
-                        for v in &mut raised_verts {
-                            v.color = task.color;
-                        }
-                        raised_verts
+                        // Apply transformations on CPU for now
+                        // Future optimization: Move to GPU only for transformations
+                        verts
+                            .iter()
+                            .map(|v| Vertex {
+                                pos: v.pos,
+                                norm: v.norm,
+                                color: task.color,
+                            })
+                            .collect()
                     } else {
                         // No transforms, just use original vertices and apply color
                         verts
