@@ -1,18 +1,18 @@
-use nalgebra_glm as glm;
-use step::step_file::StepFile;
 use crate::triangulate::{
     advanced_face_to_mesh as cpu_advanced_face_to_mesh, get_surface as cpu_get_surface,
 };
+use nalgebra_glm as glm;
+use step::step_file::StepFile;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use log::{trace};
+use log::trace;
 
 use crate::mesh::{Mesh, Vertex};
 use crate::stats::Stats;
 use crate::surface::Surface;
-use wgpu::util::DeviceExt;
 use wgpu::PollType;
+use wgpu::util::DeviceExt;
 
 // Surface type constants for shader
 const SURFACE_TYPE_PLANE: u32 = 0;
@@ -55,10 +55,10 @@ pub struct GpuTemplateVertex {
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct GpuOutputVertex {
-    pos: [f32; 4],       // 3D position (xyz) + padding
-    norm: [f32; 4],      // normal (xyz) + padding
-    color: [f32; 4],     // color (rgb) + padding
-    _padding: [f32; 4],  // padding
+    pos: [f32; 4],      // 3D position (xyz) + padding
+    norm: [f32; 4],     // normal (xyz) + padding
+    color: [f32; 4],    // color (rgb) + padding
+    _padding: [f32; 4], // padding
 }
 
 // Helper to convert from `nalgebra_glm::DMat4` to `[[f32; 4]; 4]`
@@ -118,7 +118,7 @@ pub fn to_gpu_surface(surf: &Surface) -> GpuSurface {
                 _p1: 0.0,
                 _p2: 0.0,
             }
-        },
+        }
         Surface::Cylinder {
             location,
             axis,
@@ -274,8 +274,6 @@ struct GpuTransform {
 
 // GPU compute pass to raise 2D points to 3D and apply transformations
 #[cfg(feature = "wgpu")]
-
-
 // Main orchestration function
 #[cfg(feature = "wgpu")]
 pub fn triangulate(s: &StepFile) -> (Mesh, Stats) {
@@ -344,7 +342,11 @@ pub fn triangulate_faces(
                     let final_verts = if !task.transforms.is_empty() {
                         // Use new GPU transformation function instead of CPU-only approach
                         pollster::block_on(gpu_transform_vertices(
-                            &_device, &_queue, &verts, &_surface, &task.transforms,
+                            &_device,
+                            &_queue,
+                            &verts,
+                            &_surface,
+                            &task.transforms,
                         ))
                         .unwrap_or_else(|e| {
                             trace!("GPU transformation failed: {}", e);
@@ -452,7 +454,7 @@ pub async fn gpu_transform_vertices(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     vertices: &[Vertex],
-    _surface: &Surface,  // Not used in this corrected implementation
+    _surface: &Surface, // Not used in this corrected implementation
     transforms: &[glm::DMat4],
 ) -> Result<Vec<Vertex>, Box<dyn std::error::Error>> {
     trace!("gpu_transform_vertices: Starting");
@@ -466,20 +468,29 @@ pub async fn gpu_transform_vertices(
             color: [v.color.x as f32, v.color.y as f32, v.color.z as f32, 1.0],
         })
         .collect();
-    trace!("gpu_transform_vertices: Template vertices converted, count: {}", template_vertices.len());
+    trace!(
+        "gpu_transform_vertices: Template vertices converted, count: {}",
+        template_vertices.len()
+    );
 
     // Convert transforms to GPU format
     let gpu_transforms: Vec<GpuTransform> = transforms
         .iter()
         .map(|t| {
-            let inv_transpose = t.try_inverse().map(|inv| inv.transpose()).unwrap_or_else(|| glm::DMat4::identity());
+            let inv_transpose = t
+                .try_inverse()
+                .map(|inv| inv.transpose())
+                .unwrap_or_else(|| glm::DMat4::identity());
             GpuTransform {
                 transform: mat_to_f32_array(t),
                 inverse_transpose: mat_to_f32_array(&inv_transpose),
             }
         })
         .collect();
-    trace!("gpu_transform_vertices: Transforms converted, count: {}", gpu_transforms.len());
+    trace!(
+        "gpu_transform_vertices: Transforms converted, count: {}",
+        gpu_transforms.len()
+    );
 
     // Create GPU buffers
     let template_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -504,7 +515,11 @@ pub async fn gpu_transform_vertices(
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
         mapped_at_creation: false,
     });
-    trace!("gpu_transform_vertices: Output buffer created, size: {}, expected vertices: {}", output_buffer.size(), num_output_vertices);
+    trace!(
+        "gpu_transform_vertices: Output buffer created, size: {}, expected vertices: {}",
+        output_buffer.size(),
+        num_output_vertices
+    );
 
     // Load shader code
     let shader_code = std::include_str!("transform_mesh.wgsl");
@@ -599,7 +614,10 @@ pub async fn gpu_transform_vertices(
         usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
-    trace!("gpu_transform_vertices: Staging buffer created, size: {}", staging_buffer.size());
+    trace!(
+        "gpu_transform_vertices: Staging buffer created, size: {}",
+        staging_buffer.size()
+    );
 
     // Create command encoder and compute pass
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
@@ -628,15 +646,22 @@ pub async fn gpu_transform_vertices(
     });
 
     // Read the results back from the staging buffer
-    assert_eq!(output_buffer.size(), staging_buffer.size(), "Buffer sizes must match");
+    assert_eq!(
+        output_buffer.size(),
+        staging_buffer.size(),
+        "Buffer sizes must match"
+    );
 
     let buffer_slice = staging_buffer.slice(..);
     trace!("gpu_transform_vertices: Buffer slice created");
     let (sender, receiver) = std::sync::mpsc::channel();
     trace!("gpu_transform_vertices: Channel created");
-    
+
     buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
-        trace!("gpu_transform_vertices: map_async callback called with result: {:?}", result.is_ok());
+        trace!(
+            "gpu_transform_vertices: map_async callback called with result: {:?}",
+            result.is_ok()
+        );
         // Only send if the receiver is still around (ignore send errors)
         let _ = sender.send(result);
     });
@@ -654,7 +679,7 @@ pub async fn gpu_transform_vertices(
             trace!("gpu_transform_vertices: Buffer mapping succeeded");
             let data = buffer_slice.get_mapped_range();
             let result: Vec<GpuOutputVertex> = bytemuck::cast_slice(&data).to_vec();
-            drop(data);  // Drop the mapped range before unmap
+            drop(data); // Drop the mapped range before unmap
             staging_buffer.unmap();
             trace!("gpu_transform_vertices: Buffer unmapped");
 
@@ -666,17 +691,20 @@ pub async fn gpu_transform_vertices(
                     color: glm::DVec3::new(v.color[0] as f64, v.color[1] as f64, v.color[2] as f64),
                 })
                 .collect();
-            trace!("gpu_transform_vertices: Successfully returning {} vertices", vertices.len());
+            trace!(
+                "gpu_transform_vertices: Successfully returning {} vertices",
+                vertices.len()
+            );
             Ok(vertices)
         }
         Ok(Err(e)) => {
             log::error!("gpu_transform_vertices: Buffer mapping failed: {:?}", e);
             Err(format!("Buffer mapping failed: {:?}", e).into())
-        },
+        }
         Err(_) => {
             log::error!("gpu_transform_vertices: Buffer mapping timed out");
             Err("Buffer mapping timed out".into())
-        },
+        }
     }
 }
 
@@ -856,7 +884,7 @@ pub async fn gpu_transform_vertices(
 //    trace!("gpu_transform_vertices: Buffer slice created");
 //    let (sender, receiver) = std::sync::mpsc::channel();
 //    trace!("gpu_transform_vertices: Channel created");
-//    
+//
 //    buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
 //        trace!("gpu_transform_vertices: map_async callback called with result: {:?}", result.is_ok());
 //        sender.send(result).unwrap();
@@ -919,9 +947,11 @@ mod tests {
             Ok(dq) => {
                 trace!("test_gpu_transform_vertices: Created wgpu device and queue");
                 dq
-            },
+            }
             Err(_) => {
-                trace!("test_gpu_transform_vertices: Skipping GPU test: could not create wgpu device.");
+                trace!(
+                    "test_gpu_transform_vertices: Skipping GPU test: could not create wgpu device."
+                );
                 return;
             }
         };
@@ -946,31 +976,44 @@ mod tests {
                 color: glm::vec3(0.0, 1.0, 0.0),
             },
         ];
-        trace!("test_gpu_transform_vertices: Created {} test vertices", vertices.len());
+        trace!(
+            "test_gpu_transform_vertices: Created {} test vertices",
+            vertices.len()
+        );
 
         // 3. Define a simple translation transform
         let transforms = vec![glm::translation(&glm::vec3(1.0, 1.0, 0.0))];
-        trace!("test_gpu_transform_vertices: Created {} test transforms", transforms.len());
+        trace!(
+            "test_gpu_transform_vertices: Created {} test transforms",
+            transforms.len()
+        );
 
         // 4. Transform vertices using GPU
         trace!("test_gpu_transform_vertices: Starting GPU transformation");
         let transformed_vertices = pollster::block_on(gpu_transform_vertices(
-            &device, &queue, &vertices, &surface, &transforms,
+            &device,
+            &queue,
+            &vertices,
+            &surface,
+            &transforms,
         ))
         .expect("GPU transformation failed");
-        trace!("test_gpu_transform_vertices: GPU transformation completed, got {} vertices", transformed_vertices.len());
+        trace!(
+            "test_gpu_transform_vertices: GPU transformation completed, got {} vertices",
+            transformed_vertices.len()
+        );
 
         // 5. Check if the transformed vertices match expectations
         assert_eq!(transformed_vertices.len(), 2);
         assert!((transformed_vertices[0].pos - glm::vec3(2.0, 3.0, 0.0)).norm() < 1e-6);
         assert!((transformed_vertices[1].pos - glm::vec3(4.0, 5.0, 0.0)).norm() < 1e-6);
         trace!("test_gpu_transform_vertices: Position validation passed");
-        
+
         // Normals should remain unchanged for a simple translation
         assert!((transformed_vertices[0].norm - glm::vec3(0.0, 0.0, 1.0)).norm() < 1e-6);
         assert!((transformed_vertices[1].norm - glm::vec3(0.0, 0.0, 1.0)).norm() < 1e-6);
         trace!("test_gpu_transform_vertices: Normal validation passed");
-        
+
         // Colors should match original vertices
         assert!((transformed_vertices[0].color - glm::vec3(1.0, 0.0, 0.0)).norm() < 1e-6);
         assert!((transformed_vertices[1].color - glm::vec3(0.0, 1.0, 0.0)).norm() < 1e-6);
@@ -978,4 +1021,131 @@ mod tests {
 
         trace!("test_gpu_transform_vertices: Test completed successfully");
     }
+}
+
+
+/// Triangulate faces using GPU acceleration with a pre-existing GPU device
+/// This function reuses GPU resources for better performance and resource management
+#[cfg(feature = "wgpu")]
+pub fn triangulate_faces_with_device(
+    s: &StepFile,
+    face_tasks: &Vec<crate::triangulate::FaceTask>,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+) -> (Mesh, Stats) {
+    #[cfg(feature = "rayon")]
+    use rayon::prelude::*;
+
+    // Track statistics
+    let total_faces = AtomicUsize::new(0);
+    let total_errors = AtomicUsize::new(0);
+    let total_panics = AtomicUsize::new(0);
+
+    let mesh = face_tasks
+        .par_iter()
+        .filter_map(|task| {
+            total_faces.fetch_add(1, Ordering::Relaxed);
+
+            // Get the face from the STEP file
+            let face = match s.entity(task.face_id) {
+                Some(f) => f,
+                None => {
+                    total_errors.fetch_add(1, Ordering::Relaxed);
+                    return None;
+                }
+            };
+
+            // Get the surface for this face (kept for API compatibility, but not used in current implementation)
+            let _surface = match cpu_get_surface(s, face.face_geometry) {
+                Ok(surf) => surf,
+                Err(_) => {
+                    total_errors.fetch_add(1, Ordering::Relaxed);
+                    return None;
+                }
+            };
+
+            // Create empty vectors to store results
+            let mut verts = Vec::new();
+            let mut triangles = Vec::new();
+
+            // Initialize stats for the call
+            let mut stats = Stats::default();
+
+            // Call the advanced_face_to_mesh function with the proper signature
+            match cpu_advanced_face_to_mesh(s, task.face_id, &mut verts, &mut triangles, &mut stats)
+            {
+                Ok(()) => {
+                    if verts.is_empty() {
+                        return Some(Mesh::default());
+                    }
+
+                    let mut transformed_mesh = Mesh::default();
+
+                    // Use GPU only for transformations if there are transforms
+                    let final_verts = if !task.transforms.is_empty() {
+                        // Use new GPU transformation function instead of CPU-only approach
+                        pollster::block_on(gpu_transform_vertices(
+                            device, queue, &verts, &_surface, &task.transforms,
+                        ))
+                        .unwrap_or_else(|e| {
+                            trace!("GPU transformation failed: {}", e);
+                            total_errors.fetch_add(1, Ordering::Relaxed);
+                            Vec::new()
+                        })
+                    } else {
+                        // No transforms, just use original vertices and apply color
+                        verts
+                            .iter()
+                            .map(|v| Vertex {
+                                pos: v.pos,
+                                norm: v.norm,
+                                color: task.color,
+                            })
+                            .collect()
+                    };
+
+                    transformed_mesh.verts = final_verts;
+
+                    // Replicate triangles for each transform
+                    let num_template_verts = verts.len() as u32;
+                    let num_transforms = if task.transforms.is_empty() {
+                        1
+                    } else {
+                        task.transforms.len()
+                    };
+
+                    for i in 0..num_transforms {
+                        let v_offset = i as u32 * num_template_verts;
+                        for t in &triangles {
+                            let mut tri = *t;
+                            tri.verts.add_scalar_mut(v_offset);
+                            transformed_mesh.triangles.push(tri);
+                        }
+                    }
+
+                    // Flip normals if needed
+                    if task.flip_normal {
+                        for v in &mut transformed_mesh.verts {
+                            v.norm = -v.norm;
+                        }
+                    }
+
+                    Some(transformed_mesh)
+                }
+                Err(_) => {
+                    total_errors.fetch_add(1, Ordering::Relaxed);
+                    None
+                }
+            }
+        })
+        .reduce(Mesh::default, Mesh::combine);
+
+    let stats = Stats {
+        num_shells: 0, // This would need to be tracked separately
+        num_faces: total_faces.load(Ordering::Relaxed),
+        num_errors: total_errors.load(Ordering::Relaxed),
+        num_panics: total_panics.load(Ordering::Relaxed),
+    };
+
+    (mesh, stats)
 }

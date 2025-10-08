@@ -1,4 +1,3 @@
-
 use ahash::AHashMap;
 use std::convert::TryInto;
 
@@ -14,12 +13,8 @@ use crate::{
     surface::Surface,
     triangulate::curve,
     triangulate::{
-        cartesian_point,
-        axis2_placement_3d,
-        presentation_style_color,
-        build_transform_stack,
-        transform_stack_roots,
-        collect_faces_from_brep,
+        axis2_placement_3d, build_transform_stack, cartesian_point, collect_faces_from_brep,
+        presentation_style_color, transform_stack_roots,
     },
 };
 use nurbs::{BSplineSurface, KnotVector, NURBSSurface, SampledSurface};
@@ -744,7 +739,6 @@ pub fn triangulate6(s: &StepFile) -> (Mesh, Stats) {
                 .map(|(i, _)| (Id::new(i), vec![DMat4::identity()]))
                 .collect();
     }
-
 
     let num_shells = to_mesh.len();
     let face_tasks: Vec<crate::triangulate::FaceTask> = to_mesh

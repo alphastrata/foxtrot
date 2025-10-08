@@ -9,7 +9,7 @@ struct Args {
     /// STL file to output
     #[clap(short, long = "out")]
     output: String,
-    
+
     /// Input STEP file to convert
     input: String,
 }

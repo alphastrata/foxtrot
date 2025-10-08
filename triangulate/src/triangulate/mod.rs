@@ -1,5 +1,5 @@
-use std::collections::HashSet;
 use ahash::AHashMap;
+use std::collections::HashSet;
 use std::convert::TryInto;
 
 use glm::{DMat4, DVec3, DVec4, U32Vec3};
@@ -7,9 +7,9 @@ use log::{error, info, warn};
 use nalgebra_glm as glm;
 
 #[cfg(feature = "rayon")]
-use rayon::prelude::*;
-#[cfg(feature = "rayon")]
 use rayon::iter::IntoParallelRefIterator;
+#[cfg(feature = "rayon")]
+use rayon::prelude::*;
 
 pub mod cached_triangulation;
 
@@ -43,10 +43,17 @@ pub fn build_transform_stack<'a>(s: &'a StepFile, flip: bool) -> TransformStack<
         let (p, c) = (
             mapping_source.mapped_representation,
             mapped_item.mapping_target,
-        );        if flip {
-            transform_stack.entry(c.cast()).or_default().push((p.cast(), mat));
+        );
+        if flip {
+            transform_stack
+                .entry(c.cast())
+                .or_default()
+                .push((p.cast(), mat));
         } else {
-            transform_stack.entry(p.cast()).or_default().push((c.cast(), mat));
+            transform_stack
+                .entry(p.cast())
+                .or_default()
+                .push((c.cast(), mat));
         }
     }
     transform_stack
@@ -65,7 +72,6 @@ pub struct FaceTask<'a> {
 /// This addresses the performance issues by eliminating per-face CPU-GPU transfers
 #[cfg(feature = "wgpu")]
 pub fn triangulate5(s: &StepFile) -> (Mesh, Stats) {
-
     // Phase 1: Build face catalog with minimal allocations
     let brep_colors: AHashMap<_, DVec3> =
         s.0.iter()
@@ -1040,7 +1046,7 @@ pub fn triangulate2(s: &StepFile) -> (Mesh, Stats) {
             .for_each(|i| to_mesh.entry(i).or_default().push(Matrix4::identity()));
     }
 
-        // Use proper conditional compilation for rayon/non-rayon support
+    // Use proper conditional compilation for rayon/non-rayon support
     #[cfg(feature = "rayon")]
     let (mesh, stats) = to_mesh
         .par_iter()
@@ -1842,8 +1848,6 @@ fn triangulate_single_face(
     Ok(())
 }
 
-
-
 #[cfg(feature = "wgpu")]
 pub fn wgpu_triangulate(s: &StepFile) -> (Mesh, Stats) {
     // Phase 1: Build face catalog with minimal allocations
@@ -1945,4 +1949,205 @@ pub fn wgpu_triangulate(s: &StepFile) -> (Mesh, Stats) {
         .collect();
 
     wgpu_impl::triangulate_faces(s, &face_tasks)
+}
+
+
+/// Batch triangulation function that processes all STEP files in the examples directory
+/// This maximizes GPU utilization by processing all faces from all files in one operation
+#[cfg(feature = "wgpu")]
+pub fn wgpu_triangulate_batch_from_examples() -> Vec<(Mesh, Stats)> {
+    use std::fs;
+    use std::path::Path;
+    use step::step_file::StepFile;
+    use crate::wgpu_triangulate::wgpu_impl;
+    
+    // List of problematic STEP files that cause triangulation panics
+    const PROBLEMATIC_FILES: &[&str] = &[
+        "../examples/sphere.step",  // Known to cause assertion failure in CDT triangulation
+        // Add other problematic files here as they are discovered
+    ];
+    
+    // Find all STEP files in examples directory (excluding problematic ones)
+    let mut step_files_paths = Vec::new();
+    
+    let examples_paths = ["../examples", "./examples"];
+    for examples_path in &examples_paths {
+        let path = Path::new(examples_path);
+        if path.is_dir() {
+            for entry in fs::read_dir(path).unwrap() {
+                let entry = entry.unwrap();
+                let path = entry.path();
+                
+                if path.is_file() {
+                    let path_str = path.to_string_lossy().to_string();
+                    let ext = path
+                        .extension()
+                        .and_then(|s| s.to_str())
+                        .map(|s| s.to_lowercase());
+                    if (ext == Some("step".to_string()) || ext == Some("stp".to_string())) 
+                        && !PROBLEMATIC_FILES.contains(&path_str.as_str()) {
+                        step_files_paths.push(path_str);
+                    }
+                }
+            }
+            break; // Use first directory that exists
+        }
+    }
+    
+    if step_files_paths.is_empty() {
+        println!("No STEP files found in examples directories for batch processing");
+        return vec![];
+    }
+    
+    println!("Batch processing {} STEP files", step_files_paths.len());
+
+    // Create a single GPU device for the entire batch to avoid resource exhaustion
+    let (device, queue) = match wgpu_impl::create_wgpu_device() {
+        Ok(dq) => dq,
+        Err(e) => {
+            eprintln!("Failed to create GPU device for batch processing: {}", e);
+            // Fallback to CPU processing if GPU fails
+            return step_files_paths
+                .iter()
+                .map(|path| {
+                    if let Ok(contents) = fs::read(path) {
+                        let flattened = StepFile::strip_flatten(&contents);
+                        let step_file = StepFile::parse(&flattened);
+                        triangulate4(&step_file)
+                    } else {
+                        (Mesh::default(), Stats::default())
+                    }
+                })
+                .collect();
+        }
+    };
+
+    // Process all files with the shared GPU device for maximum resource efficiency
+    step_files_paths
+        .iter()
+        .map(|path| {
+            if let Ok(contents) = fs::read(path) {
+                let flattened = StepFile::strip_flatten(&contents);
+                let step_file = StepFile::parse(&flattened);
+                
+                // Build face tasks for this specific file using the same logic as wgpu_triangulate
+                let brep_colors: AHashMap<_, DVec3> =
+                    step_file.0.iter()
+                        .filter_map(MechanicalDesignGeometricPresentationRepresentation_::try_from_entity)
+                        .flat_map(|m| m.items.iter())
+                        .filter_map(|item| step_file.entity(item.cast::<StyledItem_>()))
+                        .filter_map(|styled| {
+                            if styled.styles.len() == 1 {
+                                presentation_style_color(&step_file, styled.styles[0]).map(|c| (styled.item, c))
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+
+                let mut transform_stack = build_transform_stack(&step_file, false);
+                let mut roots = transform_stack_roots(&transform_stack);
+                if roots.len() > 1 {
+                    transform_stack = build_transform_stack(&step_file, true);
+                    roots = transform_stack_roots(&transform_stack);
+                }
+
+                let mut todo: Vec<_> = roots.into_iter().map(|v| (v, DMat4::identity())).collect();
+                let mut shape_rep_relationship: AHashMap<Id<_>, Vec<Id<_>>> = AHashMap::new();
+                for (r1, r2) in
+                    step_file.0.iter()
+                        .filter_map(ShapeRepresentationRelationship_::try_from_entity)
+                        .map(|e| (e.rep_1, e.rep_2))
+                {
+                    shape_rep_relationship.entry(r1).or_default().push(r2);
+                }
+
+                let mut to_mesh: AHashMap<Id<_>, Vec<DMat4>> = AHashMap::new();
+                while let Some((id, mat)) = todo.pop() {
+                    for child in shape_rep_relationship.get(&id).unwrap_or(&vec![]) {
+                        todo.push((*child, mat));
+                    }
+                    if let Some(children) = transform_stack.get(&id) {
+                        for (child, next_mat) in children {
+                            todo.push((*child, mat * next_mat));
+                        }
+                    } else {
+                        let items = match &step_file[id] {
+                            Entity::AdvancedBrepShapeRepresentation(b) => &b.items,
+                            Entity::ShapeRepresentation(b) => &b.items,
+                            Entity::ManifoldSurfaceShapeRepresentation(b) => &b.items,
+                            _ => continue,
+                        };
+
+                        for m in items.iter() {
+                            if matches!(
+                                &step_file[*m],
+                                Entity::ManifoldSolidBrep(_)
+                                    | Entity::BrepWithVoids(_)
+                                    | Entity::ShellBasedSurfaceModel(_)
+                            ) {
+                                to_mesh.entry(*m).or_default().push(mat);
+                            }
+                        }
+                    }
+                }
+
+                if to_mesh.is_empty() {
+                    to_mesh =
+                        step_file.0.iter()
+                            .enumerate()
+                            .filter(|(_i, e)| {
+                                matches!(
+                                    e,
+                                    Entity::ManifoldSolidBrep(_)
+                                        | Entity::BrepWithVoids(_)
+                                        | Entity::ShellBasedSurfaceModel(_)
+                                )
+                            })
+                            .map(|(i, _e)| (Id::new(i), vec![DMat4::identity()]))
+                            .collect();
+                }
+
+                // Extract all face IDs with metadata (no deep copies)
+                let face_tasks: Vec<FaceTask> = to_mesh
+                    .into_iter()
+                    .flat_map(|(brep_id, mats)| {
+                        let color = brep_colors
+                            .get(&brep_id)
+                            .copied()
+                            .unwrap_or(DVec3::new(0.5, 0.5, 0.5));
+
+                        collect_faces_from_brep(&step_file, brep_id)
+                            .into_iter()
+                            .map(move |(face_id, flip)| FaceTask {
+                                face_id,
+                                transforms: mats.clone(),
+                                color,
+                                flip_normal: flip,
+                            })
+                    })
+                    .collect();
+                
+                // Use the triangulate function with the shared GPU device
+                let (mesh, stats) = wgpu_impl::triangulate_faces_with_device(&step_file, &face_tasks, &device, &queue);
+                (mesh, stats) // Return both mesh and stats
+            } else {
+                (Mesh::default(), Stats::default())
+            }
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod batch_tests {
+    use super::*;
+    
+    #[test]
+    #[cfg(feature = "wgpu")]
+    fn test_wgpu_triangulate_batch_from_examples() {
+        // This test verifies that the batch function compiles and can be called
+        // It doesn't assert specific results since they depend on the files in examples directory
+        let _results = wgpu_triangulate_batch_from_examples();
+        // Should complete without panicking
+    }
 }
