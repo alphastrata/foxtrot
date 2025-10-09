@@ -1,9 +1,9 @@
 use clap::Parser;
-use std::fs;
-use std::path::Path;
 use std::ffi::OsStr;
-use std::time::Instant;
+use std::fs;
 use std::io::Write;
+use std::path::Path;
+use std::time::Instant;
 use triangulate::wgpu_triangulate::GPUContext;
 
 // Add necessary imports for rendering
@@ -56,11 +56,19 @@ struct Camera {
 }
 
 impl Camera {
-    fn new(pos: [f64; 3], _yaw: f64, _pitch: f64, fovy: f32, aspect: f32, znear: f32, zfar: f32) -> Self {
+    fn new(
+        pos: [f64; 3],
+        _yaw: f64,
+        _pitch: f64,
+        fovy: f32,
+        aspect: f32,
+        znear: f32,
+        zfar: f32,
+    ) -> Self {
         let eye = glm::DVec3::new(pos[0], pos[1], pos[2]);
         let target = glm::DVec3::new(0.0, 0.0, 0.0);
         let up = glm::DVec3::new(0.0, 1.0, 0.0);
-        
+
         Camera {
             eye,
             target,
@@ -75,8 +83,12 @@ impl Camera {
     fn build_view_projection_matrix(&self) -> glm::Mat4 {
         let view = glm::look_at_rh(
             &glm::vec3(self.eye.x as f32, self.eye.y as f32, self.eye.z as f32),
-            &glm::vec3(self.target.x as f32, self.target.y as f32, self.target.z as f32),
-            &glm::vec3(self.up.x as f32, self.up.y as f32, self.up.z as f32)
+            &glm::vec3(
+                self.target.x as f32,
+                self.target.y as f32,
+                self.target.z as f32,
+            ),
+            &glm::vec3(self.up.x as f32, self.up.y as f32, self.up.z as f32),
         );
         let proj = glm::perspective_rh_zo(self.aspect, self.fovy, self.znear, self.zfar);
         proj * view
@@ -112,7 +124,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for entry in fs::read_dir(&args.input_dir)? {
         let entry = entry?;
         let path = entry.path();
-        
+
         if path.is_file() {
             if let Some(ext) = path.extension() {
                 if ext == OsStr::new("step") || ext == OsStr::new("stp") {
@@ -122,7 +134,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    println!("Found {} STEP files in {}", step_files.len(), args.input_dir);
+    println!(
+        "Found {} STEP files in {}",
+        step_files.len(),
+        args.input_dir
+    );
 
     // Initialize GPU context once for all processing
     let gpu_context = GPUContext::new()?;
@@ -139,7 +155,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Process each file in the current batch using the GPU context
         for (i, file_path) in batch_chunk.iter().enumerate() {
-            println!("  Processing file {}/{}: {}", i + 1, batch_chunk.len(), Path::new(file_path).file_name().unwrap().to_string_lossy());
+            println!(
+                "  Processing file {}/{}: {}",
+                i + 1,
+                batch_chunk.len(),
+                Path::new(file_path).file_name().unwrap().to_string_lossy()
+            );
 
             // Read and parse the STEP file
             let contents = fs::read(file_path)?;
@@ -147,7 +168,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let step_file = step::step_file::StepFile::parse(&flattened);
 
             // Process using GPU context
-            let (mesh, _stats) = triangulate::triangulate::wgpu_triangulate_with_context(&step_file, &gpu_context);
+            let (mesh, _stats) =
+                triangulate::triangulate::wgpu_triangulate_with_context(&step_file, &gpu_context);
 
             // Convert to PNG and save
             let output_path = Path::new(&args.output_dir)
@@ -176,9 +198,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 (0..thumbnail_size).for_each(|i| {
                     let idx = ((i * thumbnail_size + i) * 4) as usize;
                     if idx < png_data.len() - 3 {
-                        png_data[idx] = 255;     // R
-                        png_data[idx + 1] = 0;   // G
-                        png_data[idx + 2] = 0;   // B
+                        png_data[idx] = 255; // R
+                        png_data[idx + 1] = 0; // G
+                        png_data[idx + 2] = 0; // B
                         png_data[idx + 3] = 255; // A
                     }
                 });
@@ -198,30 +220,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let mut file = std::fs::File::create(&output_path)?;
                 file.write_all(&output_png_data)?;
 
-                println!("    Saved empty mesh indicator to: {}", output_path.display());
+                println!(
+                    "    Saved empty mesh indicator to: {}",
+                    output_path.display()
+                );
                 continue; // Continue to next file
             }
 
             // Now render the mesh to PNG using wgpu
             let size = PhysicalSize::new(512, 512); // Default size, could make this configurable
             let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
-            
-            let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::HighPerformance,
-                compatible_surface: None,
-                force_fallback_adapter: false,
-            })).unwrap();
 
-            let (device, queue) = pollster::block_on(adapter.request_device(
-                &wgpu::DeviceDescriptor {
+            let adapter =
+                pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+                    power_preference: wgpu::PowerPreference::HighPerformance,
+                    compatible_surface: None,
+                    force_fallback_adapter: false,
+                }))
+                .unwrap();
+
+            let (device, queue) =
+                pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+                    label: None,
                     required_features: wgpu::Features::empty(),
                     required_limits: wgpu::Limits::default(),
-                    label: None,
                     memory_hints: wgpu::MemoryHints::Performance,
-                    experimental_features: wgpu::DeviceExperimentalFeatures::empty(),
-                    trace: None,
-                },
-            )).unwrap();
+                    trace: wgpu::Trace::Off,
+                    experimental_features: wgpu::ExperimentalFeatures::disabled(),
+                }))
+                .unwrap();
 
             // Create texture to render to
             let texture_descriptor = wgpu::TextureDescriptor {
@@ -244,14 +271,46 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // Create the render pipeline
             let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("Mesh Shader"),
-                source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!("../src/shader.wgsl"))),
+                source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
+                    "../src/shader.wgsl"
+                ))),
             });
 
-            let render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[],
-                push_constant_ranges: &[],
-            });
+            // Create uniform bind group layout first - both camera (binding 0) and light (binding 1)
+            let uniform_bind_group_layout =
+                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    entries: &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::VERTEX,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                    ],
+                    label: Some("uniform_bind_group_layout"),
+                });
+
+            // Create pipeline layout with the bind group layout
+            let render_pipeline_layout =
+                device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("Render Pipeline Layout"),
+                    bind_group_layouts: &[&uniform_bind_group_layout],
+                    push_constant_ranges: &[],
+                });
 
             let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("Mesh Render Pipeline"),
@@ -288,10 +347,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             });
 
             // Create vertex and index buffers
-            let vertices: Vec<Vertex> = mesh.verts.iter().map(|v| Vertex {
-                position: [v.pos.x as f32, v.pos.y as f32, v.pos.z as f32],
-                normal: [v.norm.x as f32, v.norm.y as f32, v.norm.z as f32],
-            }).collect();
+            let vertices: Vec<Vertex> = mesh
+                .verts
+                .iter()
+                .map(|v| Vertex {
+                    position: [v.pos.x as f32, v.pos.y as f32, v.pos.z as f32],
+                    normal: [v.norm.x as f32, v.norm.y as f32, v.norm.z as f32],
+                })
+                .collect();
 
             let indices: Vec<u32> = mesh
                 .triangles
@@ -312,43 +375,78 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             });
 
             // Create uniform buffer for camera/view matrices
-            let camera = Camera::new([0.0, 0.0, 5.0], 0.0, 0.0, 45.0_f32.to_radians(), size.width as f32 / size.height as f32, 0.1, 100.0);
+            let camera = Camera::new(
+                [0.0, 0.0, 5.0],
+                0.0,
+                0.0,
+                45.0_f32.to_radians(),
+                size.width as f32 / size.height as f32,
+                0.1,
+                100.0,
+            );
             let view_proj = camera.build_view_projection_matrix();
 
             // Convert the 4x4 matrix to an array of f32 values for the GPU
             let view_proj_array: [f32; 16] = [
-                view_proj[(0, 0)] as f32, view_proj[(0, 1)] as f32, view_proj[(0, 2)] as f32, view_proj[(0, 3)] as f32,
-                view_proj[(1, 0)] as f32, view_proj[(1, 1)] as f32, view_proj[(1, 2)] as f32, view_proj[(1, 3)] as f32,
-                view_proj[(2, 0)] as f32, view_proj[(2, 1)] as f32, view_proj[(2, 2)] as f32, view_proj[(2, 3)] as f32,
-                view_proj[(3, 0)] as f32, view_proj[(3, 1)] as f32, view_proj[(3, 2)] as f32, view_proj[(3, 3)] as f32,
+                view_proj[(0, 0)] as f32,
+                view_proj[(0, 1)] as f32,
+                view_proj[(0, 2)] as f32,
+                view_proj[(0, 3)] as f32,
+                view_proj[(1, 0)] as f32,
+                view_proj[(1, 1)] as f32,
+                view_proj[(1, 2)] as f32,
+                view_proj[(1, 3)] as f32,
+                view_proj[(2, 0)] as f32,
+                view_proj[(2, 1)] as f32,
+                view_proj[(2, 2)] as f32,
+                view_proj[(2, 3)] as f32,
+                view_proj[(3, 0)] as f32,
+                view_proj[(3, 1)] as f32,
+                view_proj[(3, 2)] as f32,
+                view_proj[(3, 3)] as f32,
             ];
 
-            let uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Uniform Buffer"),
+            let camera_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Camera Uniform Buffer"),
                 contents: bytemuck::cast_slice(&view_proj_array),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });
 
-            let uniform_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
-                label: Some("uniform_bind_group_layout"),
+            // Create light uniform buffer - needs to align to 16-byte boundaries for shader
+            #[repr(C)]
+            #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+            struct Light {
+                direction: [f32; 3],
+                _padding1: f32, // padding to align to 16-byte boundary
+                color: [f32; 3],
+                _padding2: f32, // padding to align to 16-byte boundary
+            }
+
+            let light_data = Light {
+                direction: [-1.0, -1.0, -1.0], // Light direction
+                _padding1: 0.0,
+                color: [1.0, 1.0, 1.0], // White light
+                _padding2: 0.0,
+            };
+
+            let light_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Light Uniform Buffer"),
+                contents: bytemuck::cast_slice(&[light_data]),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });
 
             let uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 layout: &uniform_bind_group_layout,
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: uniform_buf.as_entire_binding(),
-                }],
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: camera_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: light_buf.as_entire_binding(),
+                    },
+                ],
                 label: Some("uniform_bind_group"),
             });
 
@@ -389,17 +487,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             queue.submit(std::iter::once(encoder.finish()));
 
             // Read texture data back
+            let bytes_per_row_alignment = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+            let unpadded_bytes_per_row = size.width * 4;
+            let padded_bytes_per_row =
+                unpadded_bytes_per_row.div_ceil(bytes_per_row_alignment) * bytes_per_row_alignment;
+
             let buffer = device.create_buffer(&wgpu::BufferDescriptor {
                 label: None,
-                size: (size.width * size.height * 4) as u64,
+                size: (padded_bytes_per_row * size.height) as u64,
                 usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
                 mapped_at_creation: false,
             });
 
-            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+            let mut encoder =
+                device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
             encoder.copy_texture_to_buffer(
-                &texture.as_image_copy(),
-                &buffer.as_image_copy(),
+                wgpu::TexelCopyTextureInfo {
+                    texture: &texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                wgpu::TexelCopyBufferInfo {
+                    buffer: &buffer,
+                    layout: wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(padded_bytes_per_row),
+                        rows_per_image: Some(size.height),
+                    },
+                },
                 wgpu::Extent3d {
                     width: size.width,
                     height: size.height,
@@ -410,11 +526,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             // Map the buffer and get the data
             let (tx, rx) = std::sync::mpsc::channel();
-            buffer.slice(..).map_async(wgpu::MapMode::Read, move |result| {
-                tx.send(result).unwrap();
-            });
+            buffer
+                .slice(..)
+                .map_async(wgpu::MapMode::Read, move |result| {
+                    tx.send(result).unwrap();
+                });
 
-            device.poll(wgpu::Maintain::default());
+            device
+                .poll(wgpu::PollType::Wait {
+                    submission_index: None,
+                    timeout: None,
+                })
+                .unwrap();
             rx.recv().unwrap().unwrap();
 
             let img_data = buffer.slice(..).get_mapped_range().to_vec();
@@ -435,11 +558,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             // Encode to PNG
             let mut png_data = Vec::<u8>::with_capacity(flipped_img_data.len());
-            let mut encoder = png::Encoder::new(
-                std::io::Cursor::new(&mut png_data),
-                size.width,
-                size.height,
-            );
+            assert!(png_data.iter().all(|v| v != &255));
+            let mut encoder =
+                png::Encoder::new(std::io::Cursor::new(&mut png_data), size.width, size.height);
             encoder.set_color(png::ColorType::Rgba);
             let mut png_writer = encoder.write_header().unwrap();
             png_writer.write_image_data(&flipped_img_data[..]).unwrap();
@@ -457,8 +578,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let total_duration = start_time.elapsed();
-    println!("\nProcessed {} files in {:.2?}", total_processed, total_duration);
-    println!("Average processing time per file: {:.2?}", total_duration / total_processed.max(1) as u32);
+    println!(
+        "\nProcessed {} files in {:.2?}",
+        total_processed, total_duration
+    );
+    println!(
+        "Average processing time per file: {:.2?}",
+        total_duration / total_processed.max(1) as u32
+    );
 
     Ok(())
 }
