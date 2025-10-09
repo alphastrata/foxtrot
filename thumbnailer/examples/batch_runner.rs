@@ -3,7 +3,85 @@ use std::fs;
 use std::path::Path;
 use std::ffi::OsStr;
 use std::time::Instant;
+use std::io::Write;
 use triangulate::wgpu_triangulate::GPUContext;
+
+// Add necessary imports for rendering
+use nalgebra_glm as glm;
+use pollster;
+use wgpu;
+use wgpu::util::DeviceExt;
+use winit::dpi::PhysicalSize;
+
+// Add PNG encoding
+use png;
+
+// Define simple structures needed for rendering
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+struct Vertex {
+    position: [f32; 3],
+    normal: [f32; 3],
+}
+
+impl Vertex {
+    fn desc<'a>() -> wgpu::VertexBufferLayout<'a> {
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &[
+                wgpu::VertexAttribute {
+                    offset: 0,
+                    shader_location: 0,
+                    format: wgpu::VertexFormat::Float32x3,
+                },
+                wgpu::VertexAttribute {
+                    offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
+                    shader_location: 1,
+                    format: wgpu::VertexFormat::Float32x3,
+                },
+            ],
+        }
+    }
+}
+
+struct Camera {
+    eye: glm::DVec3,
+    target: glm::DVec3,
+    up: glm::DVec3,
+    aspect: f32,
+    fovy: f32,
+    znear: f32,
+    zfar: f32,
+}
+
+impl Camera {
+    fn new(pos: [f64; 3], _yaw: f64, _pitch: f64, fovy: f32, aspect: f32, znear: f32, zfar: f32) -> Self {
+        let eye = glm::DVec3::new(pos[0], pos[1], pos[2]);
+        let target = glm::DVec3::new(0.0, 0.0, 0.0);
+        let up = glm::DVec3::new(0.0, 1.0, 0.0);
+        
+        Camera {
+            eye,
+            target,
+            up,
+            aspect,
+            fovy,
+            znear,
+            zfar,
+        }
+    }
+
+    fn build_view_projection_matrix(&self) -> glm::Mat4 {
+        let view = glm::look_at_rh(
+            &glm::vec3(self.eye.x as f32, self.eye.y as f32, self.eye.z as f32),
+            &glm::vec3(self.target.x as f32, self.target.y as f32, self.target.z as f32),
+            &glm::vec3(self.up.x as f32, self.up.y as f32, self.up.z as f32)
+        );
+        let proj = glm::perspective_rh_zo(self.aspect, self.fovy, self.znear, self.zfar);
+        proj * view
+    }
+}
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -12,7 +90,7 @@ struct Args {
     #[arg(short, long, default_value = "./examples")]
     input_dir: String,
 
-    /// Output directory for processed STL files
+    /// Output directory for processed PNG files
     #[arg(short, long, default_value = "./output")]
     output_dir: String,
 
@@ -71,68 +149,304 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // Process using GPU context
             let (mesh, _stats) = triangulate::triangulate::wgpu_triangulate_with_context(&step_file, &gpu_context);
 
-            // Convert to STL and save
+            // Convert to PNG and save
             let output_path = Path::new(&args.output_dir)
                 .join(Path::new(file_path).file_stem().unwrap())
-                .with_extension("stl");
+                .with_extension("png");
 
-            // Write the mesh as STL
-            let mut stl_content = Vec::new();
-            for triangle in &mesh.triangles {
-                // Get the three vertices of the triangle
-                let v1 = mesh.verts[triangle.verts.x as usize].pos;
-                let v2 = mesh.verts[triangle.verts.y as usize].pos;
-                let v3 = mesh.verts[triangle.verts.z as usize].pos;
+            // Skip if mesh is empty
+            if mesh.verts.is_empty() || mesh.triangles.is_empty() {
+                eprintln!(
+                    "Warning: Mesh is empty ({} vertices, {} triangles). Creating empty PNG with message.",
+                    mesh.verts.len(),
+                    mesh.triangles.len()
+                );
 
-                // Calculate normal using cross product
-                let edge1 = nalgebra_glm::DVec3::new(v2.x - v1.x, v2.y - v1.y, v2.z - v1.z);
-                let edge2 = nalgebra_glm::DVec3::new(v3.x - v1.x, v3.y - v1.y, v3.z - v1.z);
-                let normal = nalgebra_glm::cross(&edge1, &edge2);
-                let normal = normal.normalize();
+                let thumbnail_size = 512; // Default size
+                let mut png_data =
+                    Vec::<u8>::with_capacity((thumbnail_size * thumbnail_size * 4) as usize);
 
-                // Add to STL content as binary format (simplified)
-                // Write normal (3 floats) + 3 vertices (9 floats) + 1 uint16 (attribute byte count)
-                stl_content.extend_from_slice(&(normal.x as f32).to_le_bytes());
-                stl_content.extend_from_slice(&(normal.y as f32).to_le_bytes());
-                stl_content.extend_from_slice(&(normal.z as f32).to_le_bytes());
+                let bg_color = vec![255, 255, 255, 255]; // White background
 
-                // Vertex 1
-                stl_content.extend_from_slice(&(v1.x as f32).to_le_bytes());
-                stl_content.extend_from_slice(&(v1.y as f32).to_le_bytes());
-                stl_content.extend_from_slice(&(v1.z as f32).to_le_bytes());
+                (0..(thumbnail_size * thumbnail_size)).for_each(|_| {
+                    png_data.extend_from_slice(&bg_color);
+                });
 
-                // Vertex 2
-                stl_content.extend_from_slice(&(v2.x as f32).to_le_bytes());
-                stl_content.extend_from_slice(&(v2.y as f32).to_le_bytes());
-                stl_content.extend_from_slice(&(v2.z as f32).to_le_bytes());
+                // Add a red diagonal line to indicate empty mesh
+                (0..thumbnail_size).for_each(|i| {
+                    let idx = ((i * thumbnail_size + i) * 4) as usize;
+                    if idx < png_data.len() - 3 {
+                        png_data[idx] = 255;     // R
+                        png_data[idx + 1] = 0;   // G
+                        png_data[idx + 2] = 0;   // B
+                        png_data[idx + 3] = 255; // A
+                    }
+                });
 
-                // Vertex 3
-                stl_content.extend_from_slice(&(v3.x as f32).to_le_bytes());
-                stl_content.extend_from_slice(&(v3.y as f32).to_le_bytes());
-                stl_content.extend_from_slice(&(v3.z as f32).to_le_bytes());
+                let mut output_png_data = Vec::<u8>::with_capacity(png_data.len());
+                let mut encoder = png::Encoder::new(
+                    std::io::Cursor::new(&mut output_png_data),
+                    thumbnail_size,
+                    thumbnail_size,
+                );
+                encoder.set_color(png::ColorType::Rgba);
 
-                // Attribute byte count
-                stl_content.extend_from_slice(&[0u8, 0u8]);
+                let mut png_writer = encoder.write_header().unwrap();
+                png_writer.write_image_data(&png_data[..]).unwrap();
+                png_writer.finish().unwrap();
+
+                let mut file = std::fs::File::create(&output_path)?;
+                file.write_all(&output_png_data)?;
+
+                println!("    Saved empty mesh indicator to: {}", output_path.display());
+                continue; // Continue to next file
             }
 
-            // Write the STL to file with proper binary STL header
-            let mut output_file = std::fs::File::create(&output_path)?;
-            use std::io::Write;
+            // Now render the mesh to PNG using wgpu
+            let size = PhysicalSize::new(512, 512); // Default size, could make this configurable
+            let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
             
-            // Write STL header (80 bytes)
-            let header = format!("Generated by batch_runner - {}", output_path.file_name().unwrap().to_string_lossy());
-            let mut full_header = [0u8; 80];
-            let header_bytes = header.as_bytes();
-            let copy_len = std::cmp::min(header_bytes.len(), 80);
-            full_header[..copy_len].copy_from_slice(&header_bytes[..copy_len]);
-            output_file.write_all(&full_header)?;
-            
-            // Write number of triangles
-            let num_triangles = (stl_content.len() / 50) as u32; // 50 bytes per triangle in binary STL
-            output_file.write_all(&num_triangles.to_le_bytes())?;
-            
-            // Write triangle data
-            output_file.write_all(&stl_content)?;
+            let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                compatible_surface: None,
+                force_fallback_adapter: false,
+            })).unwrap();
+
+            let (device, queue) = pollster::block_on(adapter.request_device(
+                &wgpu::DeviceDescriptor {
+                    required_features: wgpu::Features::empty(),
+                    required_limits: wgpu::Limits::default(),
+                    label: None,
+                    memory_hints: wgpu::MemoryHints::Performance,
+                    experimental_features: wgpu::DeviceExperimentalFeatures::empty(),
+                    trace: None,
+                },
+            )).unwrap();
+
+            // Create texture to render to
+            let texture_descriptor = wgpu::TextureDescriptor {
+                size: wgpu::Extent3d {
+                    width: size.width,
+                    height: size.height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                label: Some("Render Texture"),
+                view_formats: &[],
+            };
+            let texture = device.create_texture(&texture_descriptor);
+            let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+            // Create the render pipeline
+            let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("Mesh Shader"),
+                source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!("../src/shader.wgsl"))),
+            });
+
+            let render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Render Pipeline Layout"),
+                bind_group_layouts: &[],
+                push_constant_ranges: &[],
+            });
+
+            let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("Mesh Render Pipeline"),
+                layout: Some(&render_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    buffers: &[Vertex::desc()],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("fs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: texture_descriptor.format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: Some(wgpu::Face::Back),
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    unclipped_depth: false,
+                    conservative: false,
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                multiview: None,
+                cache: None,
+            });
+
+            // Create vertex and index buffers
+            let vertices: Vec<Vertex> = mesh.verts.iter().map(|v| Vertex {
+                position: [v.pos.x as f32, v.pos.y as f32, v.pos.z as f32],
+                normal: [v.norm.x as f32, v.norm.y as f32, v.norm.z as f32],
+            }).collect();
+
+            let indices: Vec<u32> = mesh
+                .triangles
+                .iter()
+                .flat_map(|t| [t.verts.x, t.verts.y, t.verts.z])
+                .collect();
+
+            let vertex_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Vertex Buffer"),
+                contents: bytemuck::cast_slice(&vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+
+            let index_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Index Buffer"),
+                contents: bytemuck::cast_slice(&indices),
+                usage: wgpu::BufferUsages::INDEX,
+            });
+
+            // Create uniform buffer for camera/view matrices
+            let camera = Camera::new([0.0, 0.0, 5.0], 0.0, 0.0, 45.0_f32.to_radians(), size.width as f32 / size.height as f32, 0.1, 100.0);
+            let view_proj = camera.build_view_projection_matrix();
+
+            // Convert the 4x4 matrix to an array of f32 values for the GPU
+            let view_proj_array: [f32; 16] = [
+                view_proj[(0, 0)] as f32, view_proj[(0, 1)] as f32, view_proj[(0, 2)] as f32, view_proj[(0, 3)] as f32,
+                view_proj[(1, 0)] as f32, view_proj[(1, 1)] as f32, view_proj[(1, 2)] as f32, view_proj[(1, 3)] as f32,
+                view_proj[(2, 0)] as f32, view_proj[(2, 1)] as f32, view_proj[(2, 2)] as f32, view_proj[(2, 3)] as f32,
+                view_proj[(3, 0)] as f32, view_proj[(3, 1)] as f32, view_proj[(3, 2)] as f32, view_proj[(3, 3)] as f32,
+            ];
+
+            let uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Uniform Buffer"),
+                contents: bytemuck::cast_slice(&view_proj_array),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+
+            let uniform_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+                label: Some("uniform_bind_group_layout"),
+            });
+
+            let uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                layout: &uniform_bind_group_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: uniform_buf.as_entire_binding(),
+                }],
+                label: Some("uniform_bind_group"),
+            });
+
+            // Render to texture
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Render Encoder"),
+            });
+
+            {
+                let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("Render Pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &texture_view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color {
+                                r: 1.0,
+                                g: 1.0,
+                                b: 1.0,
+                                a: 1.0,
+                            }),
+                            store: wgpu::StoreOp::Store,
+                        },
+                        depth_slice: None,
+                    })],
+                    depth_stencil_attachment: None,
+                    occlusion_query_set: None,
+                    timestamp_writes: None,
+                });
+
+                render_pass.set_pipeline(&render_pipeline);
+                render_pass.set_bind_group(0, &uniform_bind_group, &[]);
+                render_pass.set_vertex_buffer(0, vertex_buf.slice(..));
+                render_pass.set_index_buffer(index_buf.slice(..), wgpu::IndexFormat::Uint32);
+                render_pass.draw_indexed(0..indices.len() as u32, 0, 0..1);
+            }
+
+            queue.submit(std::iter::once(encoder.finish()));
+
+            // Read texture data back
+            let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: None,
+                size: (size.width * size.height * 4) as u64,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            });
+
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+            encoder.copy_texture_to_buffer(
+                &texture.as_image_copy(),
+                &buffer.as_image_copy(),
+                wgpu::Extent3d {
+                    width: size.width,
+                    height: size.height,
+                    depth_or_array_layers: 1,
+                },
+            );
+            queue.submit(std::iter::once(encoder.finish()));
+
+            // Map the buffer and get the data
+            let (tx, rx) = std::sync::mpsc::channel();
+            buffer.slice(..).map_async(wgpu::MapMode::Read, move |result| {
+                tx.send(result).unwrap();
+            });
+
+            device.poll(wgpu::Maintain::default());
+            rx.recv().unwrap().unwrap();
+
+            let img_data = buffer.slice(..).get_mapped_range().to_vec();
+            drop(buffer);
+
+            // Flip the image vertically for correct PNG orientation
+            let mut flipped_img_data = Vec::with_capacity(img_data.len());
+            let row_size = (size.width * 4) as usize;
+
+            for row in (0..size.height).rev() {
+                let start_idx = (row * size.width * 4) as usize;
+                let end_idx = start_idx + row_size;
+                if start_idx < img_data.len() {
+                    let end_idx = std::cmp::min(end_idx, img_data.len());
+                    flipped_img_data.extend_from_slice(&img_data[start_idx..end_idx]);
+                }
+            }
+
+            // Encode to PNG
+            let mut png_data = Vec::<u8>::with_capacity(flipped_img_data.len());
+            let mut encoder = png::Encoder::new(
+                std::io::Cursor::new(&mut png_data),
+                size.width,
+                size.height,
+            );
+            encoder.set_color(png::ColorType::Rgba);
+            let mut png_writer = encoder.write_header().unwrap();
+            png_writer.write_image_data(&flipped_img_data[..]).unwrap();
+            png_writer.finish().unwrap();
+
+            let mut file = std::fs::File::create(&output_path)?;
+            file.write_all(&png_data)?;
 
             println!("    Saved to: {}", output_path.display());
         }
