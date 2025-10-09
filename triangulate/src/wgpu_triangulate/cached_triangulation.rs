@@ -818,7 +818,7 @@ pub fn triangulate6(s: &StepFile) -> (Mesh, Stats) {
                 }
             }
         })
-        .reduce(|| Mesh::default(), |a, b| Mesh::combine(a, b));
+        .reduce(Mesh::default, Mesh::combine);
 
     let stats = Stats {
         num_shells,

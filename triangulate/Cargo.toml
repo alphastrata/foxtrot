@@ -40,3 +40,9 @@ required-features = ["rayon", "wgpu"]
 name = 'batch_triangulation'
 harness = false
 required-features = ["rayon", "wgpu"]
+
+
+[[bench]]
+name = 'batch_scaling'
+harness = false
+required-features = ["rayon", "wgpu"]

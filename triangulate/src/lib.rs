@@ -3,6 +3,8 @@ pub mod mesh;
 pub mod stats;
 pub mod surface;
 pub mod triangulate;
+
+#[cfg(feature = "wgpu")]
 pub mod wgpu_triangulate;
 
 #[derive(thiserror::Error, Debug, Eq, PartialEq)]

@@ -1,4 +1,4 @@
-use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::fs;
 use std::path::Path;
 use step::step_file::StepFile;
@@ -7,7 +7,7 @@ use triangulate::triangulate::{wgpu_triangulate, wgpu_triangulate_batch_from_exa
 /// Find all STEP files in the examples directory
 fn find_step_files() -> Vec<String> {
     let mut step_files_paths = Vec::new();
-    
+
     let examples_paths = ["../examples", "./examples"];
     for examples_path in &examples_paths {
         let path = Path::new(examples_path);
@@ -15,7 +15,7 @@ fn find_step_files() -> Vec<String> {
             for entry in fs::read_dir(path).unwrap() {
                 let entry = entry.unwrap();
                 let path = entry.path();
-                
+
                 if path.is_file() {
                     let ext = path
                         .extension()
@@ -23,27 +23,24 @@ fn find_step_files() -> Vec<String> {
                         .map(|s| s.to_lowercase());
                     if ext == Some("step".to_string()) || ext == Some("stp".to_string()) {
                         step_files_paths.push(path.to_string_lossy().to_string());
-                        println!("Found STEP file: {}", path.display());
                     }
                 }
             }
-            break; // Use first directory that exists
+            break;
         }
     }
-    
+
     step_files_paths
 }
 
 /// Benchmark individual GPU triangulation (one device per file)
 fn benchmark_individual_gpu_triangulation(c: &mut Criterion) {
     let mut step_files = find_step_files();
-    
+
     if step_files.is_empty() {
-        println!("No STEP files found in examples directories for benchmarking");
+        eprintln!("No STEP files found in examples directories for benchmarking");
         return;
     }
-    
-    println!("Benchmarking {} STEP files individually", step_files.len());
 
     // Increase number of files by duplicating existing ones if needed
     // This allows us to test with more data without needing actual files
@@ -55,13 +52,12 @@ fn benchmark_individual_gpu_triangulation(c: &mut Criterion) {
             break;
         }
     }
-    
-    println!("Using {} STEP files in individual benchmark (duplicated as needed)", step_files.len());
 
     // Configure Criterion with sample size
     let mut group = c.benchmark_group("Individual GPU Triangulation");
     group.sample_size(10.min(step_files.len())); // Cap at 10 runs
-    
+    group.throughput(Throughput::Elements(step_files.len() as u64));
+
     group.bench_with_input(
         BenchmarkId::new("Individual GPU", step_files.len()),
         &step_files,
@@ -75,28 +71,28 @@ fn benchmark_individual_gpu_triangulation(c: &mut Criterion) {
                             let step_file = StepFile::parse(&flattened);
                             wgpu_triangulate(&step_file)
                         } else {
-                            (triangulate::mesh::Mesh::default(), triangulate::stats::Stats::default())
+                            (
+                                triangulate::mesh::Mesh::default(),
+                                triangulate::stats::Stats::default(),
+                            )
                         }
                     })
                     .collect::<Vec<_>>()
             });
         },
     );
-    
+
     group.finish();
 }
 
 /// Benchmark batch GPU triangulation (single device for all files)
 fn benchmark_batch_gpu_triangulation(c: &mut Criterion) {
     let mut step_files = find_step_files();
-    
+
     if step_files.is_empty() {
-        println!("No STEP files found in examples directories for benchmarking");
+        eprintln!("No STEP files found in examples directories for benchmarking");
         return;
     }
-    
-    println!("Benchmarking {} STEP files in batch", step_files.len());
-
     // Increase number of files by duplicating existing ones if needed
     // This allows us to test with more data without needing actual files
     let target_batch_size = 10.min(step_files.len()); // Cap at 10 for faster iteration
@@ -107,36 +103,31 @@ fn benchmark_batch_gpu_triangulation(c: &mut Criterion) {
             break;
         }
     }
-    
-    println!("Using {} STEP files in batch benchmark (duplicated as needed)", step_files.len());
 
     // Configure Criterion with sample size
     let mut group = c.benchmark_group("Batch GPU Triangulation");
     group.sample_size(10.min(step_files.len())); // Cap at 10 runs
-    
+    group.throughput(Throughput::Elements(step_files.len() as u64));
+
     group.bench_with_input(
         BenchmarkId::new("Batch GPU", step_files.len()),
         &step_files,
         |b, _files| {
-            b.iter(|| {
-                wgpu_triangulate_batch_from_examples()
-            });
+            b.iter(|| wgpu_triangulate_batch_from_examples());
         },
     );
-    
+
     group.finish();
 }
 
 /// Compare individual vs batch performance
 fn benchmark_individual_vs_batch(c: &mut Criterion) {
     let mut step_files = find_step_files();
-    
+
     if step_files.is_empty() {
-        println!("No STEP files found in examples directories for benchmarking");
+        eprintln!("No STEP files found in examples directories for benchmarking");
         return;
     }
-    
-    println!("Comparing individual vs batch triangulation for {} STEP files", step_files.len());
 
     // Increase number of files by duplicating existing ones if needed
     // This allows us to test with more data without needing actual files
@@ -148,12 +139,11 @@ fn benchmark_individual_vs_batch(c: &mut Criterion) {
             break;
         }
     }
-    
-    println!("Using {} STEP files in comparison benchmark (duplicated as needed)", step_files.len());
 
     let mut group = c.benchmark_group("Batch Comparison");
     group.sample_size(10.min(step_files.len())); // Cap at 10 runs
-    
+    group.throughput(Throughput::Elements(step_files.len() as u64));
+
     group.bench_with_input(
         BenchmarkId::new("Individual GPU", step_files.len()),
         &step_files,
@@ -167,24 +157,25 @@ fn benchmark_individual_vs_batch(c: &mut Criterion) {
                             let step_file = StepFile::parse(&flattened);
                             wgpu_triangulate(&step_file)
                         } else {
-                            (triangulate::mesh::Mesh::default(), triangulate::stats::Stats::default())
+                            (
+                                triangulate::mesh::Mesh::default(),
+                                triangulate::stats::Stats::default(),
+                            )
                         }
                     })
                     .collect::<Vec<_>>()
             });
         },
     );
-    
+
     group.bench_with_input(
         BenchmarkId::new("Batch GPU", step_files.len()),
         &step_files,
         |b, _files| {
-            b.iter(|| {
-                wgpu_triangulate_batch_from_examples()
-            });
+            b.iter(|| wgpu_triangulate_batch_from_examples());
         },
     );
-    
+
     group.finish();
 }
 
