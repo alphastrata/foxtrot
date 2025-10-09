@@ -144,9 +144,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let gpu_context = GPUContext::new()?;
     println!("GPU context initialized successfully");
 
-    // Process files in batches
+    // Track processing statistics
     let start_time = Instant::now();
     let mut total_processed = 0;
+
+    // Create a shared renderer instance for all processing
+    let size = PhysicalSize::new(512, 512); // Default size, could make this configurable
+    let renderer = pollster::block_on(Renderer::new(size, wgpu::TextureFormat::Bgra8UnormSrgb));
+    println!("Renderer initialized successfully");
 
     for batch_chunk in step_files.chunks(args.batch_size as usize) {
         println!("Processing batch of {} files...", batch_chunk.len());
@@ -227,6 +232,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 continue; // Continue to next file
             }
 
+<<<<<<< Updated upstream
             // Now render the mesh to PNG using wgpu
             let size = PhysicalSize::new(512, 512); // Default size, could make this configurable
             let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
@@ -568,6 +574,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             let mut file = std::fs::File::create(&output_path)?;
             file.write_all(&png_data)?;
+||||||| Stash base
+            // Now render the mesh to PNG using the shared renderer
+            let size = PhysicalSize::new(512, 512); // Default size, could make this configurable
+            let renderer = pollster::block_on(Renderer::new(size, wgpu::TextureFormat::Bgra8UnormSrgb));
+
+            renderer.render_mesh_to_png(&mesh, &output_path.to_string_lossy(), Some(512), false)?;
+=======
+            // Now render the mesh to PNG using the shared renderer
+            renderer.render_mesh_to_png(&mesh, &output_path.to_string_lossy(), Some(512), false)?;
+>>>>>>> Stashed changes
 
             println!("    Saved to: {}", output_path.display());
         }
