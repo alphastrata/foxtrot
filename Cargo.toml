@@ -1,42 +1,42 @@
 [workspace]
 members = [
-    "cdt",
-    "express",
-    "step",
-    "gui",
-    "nurbs",
-    "triangulate",
-    "examples/thumbnailer",
+  "cdt",
+  "express",
+  "step",
+  "gui",
+  "nurbs",
+  "triangulate",
+  "examples/thumbnailer",
 ]
 exclude = ["wasm"]
 resolver = "3"
 
 [workspace.dependencies]
-ordered-float = "5.1.0"
-smallvec = "1.6"
-rand = "0.9.2"
-rand_chacha = "0.9.0"
-rusttype = "0.9"
-bytemuck = "1.23.2"
-png = "0.18.0"
-tracing = "0.1.41"
-tracing-subscriber = "0.3.20"
-criterion = "0.7.0"
-geometry-predicates = "0.3.0"
-thiserror = "2.0.17"
-fast-float = "0.2"
-memchr = "2.4.0"
-nom = "7.1"
+ahash = "0.8"
 arrayvec = "0.7.1"
-log = "0.4.14"
-rayon = "1.11"
+bytemuck = "1.23.2"
 clap = "4.5"
+criterion = "0.7.0"
 env_logger = "0.11"
+fast-float = "0.2"
+geometry-predicates = "0.3.0"
 itertools = "0.14.0"
+log = "0.4.14"
+memchr = "2.4.0"
 nalgebra = "0.34.1"
 nalgebra-glm = "0.20.0"
+nom = "7.1"
+num-integer = "0.1"
+ordered-float = "5.1.0"
+png = "0.18.0"
 pollster = "0.4.0"
+rand = "0.9.2"
+rand_chacha = "0.9.0"
+rayon = "1.11"
+rusttype = "0.9"
+smallvec = "1.6"
+thiserror = "2.0.17"
+tracing = "0.1.41"
+tracing-subscriber = "0.3.20"
 wgpu = "27.0.1"
 winit = "0.30.12"
-num-integer = "0.1"
-    ahash = "0.8"

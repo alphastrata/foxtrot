@@ -17,8 +17,8 @@ use crate::{
     mesh::Mesh,
     stats::Stats,
     triangulate::{
-        FaceTask, build_transform_stack, collect_faces_from_brep, presentation_style_color,
-        transform_stack_roots,
+        build_transform_stack, collect_faces_from_brep, presentation_style_color,
+        transform_stack_roots, FaceTask,
     },
 };
 
@@ -181,8 +181,6 @@ pub fn wgpu_triangulate_batch_from_examples() -> Vec<(Mesh, Stats)> {
         println!("No STEP files found in examples directories for batch processing");
         return vec![];
     }
-
-    println!("Batch processing {} STEP files", step_files_paths.len());
 
     // Create a single GPU device for the entire batch to avoid resource exhaustion
     let (device, queue) = match wgpu_utils::create_wgpu_device() {

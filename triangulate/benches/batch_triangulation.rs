@@ -3,7 +3,7 @@ use std::fs;
 use std::path::Path;
 use step::step_file::StepFile;
 
-use triangulate::wgpu_triangulate::{wgpu_triangulate, wgpu_triangulate_batch_from_examples};
+use triangulate::wgpu_triangulate::wgpu_triangulate_batch_from_examples;
 
 /// Find all STEP files in the examples directory
 fn find_step_files() -> Vec<String> {
@@ -64,13 +64,15 @@ fn benchmark_individual_gpu_triangulation(c: &mut Criterion) {
         &step_files,
         |b, files| {
             b.iter(|| {
+                // Create a single GPU context for this iteration to avoid device creation overhead
+                let gpu_context = triangulate::wgpu_triangulate::GPUContext::new().expect("Failed to create GPU context");
                 files
                     .iter()
                     .map(|path| {
                         if let Ok(contents) = fs::read(path) {
                             let flattened = StepFile::strip_flatten(&contents);
                             let step_file = StepFile::parse(&flattened);
-                            wgpu_triangulate(&step_file)
+                            gpu_context.triangulate(&step_file)
                         } else {
                             (
                                 triangulate::mesh::Mesh::default(),
@@ -150,13 +152,15 @@ fn benchmark_individual_vs_batch(c: &mut Criterion) {
         &step_files,
         |b, files| {
             b.iter(|| {
+                // Create a single GPU context for this iteration to avoid device creation overhead
+                let gpu_context = triangulate::wgpu_triangulate::GPUContext::new().expect("Failed to create GPU context");
                 files
                     .iter()
                     .map(|path| {
                         if let Ok(contents) = fs::read(path) {
                             let flattened = StepFile::strip_flatten(&contents);
                             let step_file = StepFile::parse(&flattened);
-                            wgpu_triangulate(&step_file)
+                            gpu_context.triangulate(&step_file)
                         } else {
                             (
                                 triangulate::mesh::Mesh::default(),

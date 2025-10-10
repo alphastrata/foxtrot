@@ -20,7 +20,6 @@ bytemuck = { workspace = true, optional = true }
 nalgebra = { workspace = true, optional = true }
 
 
-
 [dev-dependencies]
 clap = { workspace = true, features = ["derive"] }
 criterion = { workspace = true, features = ["html_reports"] }
