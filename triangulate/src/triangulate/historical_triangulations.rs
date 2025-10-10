@@ -2260,7 +2260,7 @@ pub fn triangulate5(s: &StepFile) -> (Mesh, Stats) {
 
     // Phase 3: Batched GPU triangulation for all faces
     // This is the key optimization - process all faces in a single GPU operation
-    crate::triangulate::wgpu_impl::triangulate_faces(s, &face_tasks)
+    crate::wgpu_triangulate::triangulate_faces(s, &face_tasks)
 }
 
 /// Truly optimized batched triangulation that processes all faces in a single GPU operation
