@@ -422,7 +422,7 @@ impl Triangulation {
 
     /// Walks the upper hull, making it convex.
     /// This should only be called once from `finalize()`.
-    fn make_outer_hull_convex(&mut self) {
+    fn make_outer_hull_convex(&mut self) -> Result<(), Error> {
         // Walk the hull from left to right, flattening any convex regions
         assert!(self.next == self.points.len());
         let mut start = self.hull.start();
@@ -442,7 +442,9 @@ impl Triangulation {
 
             let edge_l = self.half.edge(el);
             let edge_r = self.half.edge(er);
-            assert!(edge_r.dst == edge_l.src);
+            if edge_r.dst != edge_l.src {
+                return Err(Error::HullMismatch);
+            }
 
             // If this triangle on the hull is strictly convex, fill it
             if self.orient2d(edge_l.dst, edge_l.src, edge_r.src) > 0.0 {
@@ -470,12 +472,13 @@ impl Triangulation {
                 }
             }
         }
+        Ok(())
     }
 
     /// Finalizes the triangulation by making the outer hull convex (in the case
     /// of unconstrained triangulation), or removing unattached triangles (for
     /// CDT).
-    fn finalize(&mut self) {
+    fn finalize(&mut self) -> Result<(), Error> {
         assert!(self.next == self.points.len());
 
         if self.constrained {
@@ -486,10 +489,11 @@ impl Triangulation {
             self.half.flood_erase_from(e);
         } else {
             // For an unconstrained triangulation, make the outer hull convex
-            self.make_outer_hull_convex();
+            self.make_outer_hull_convex()?;
         }
 
         self.next += 1usize;
+        Ok(())
     }
 
     /// Checks that invariants of the algorithm are maintained. This is a slow
@@ -511,7 +515,7 @@ impl Triangulation {
         if self.done() {
             return Err(Error::NoMorePoints);
         } else if self.next == self.points.len() {
-            self.finalize();
+            self.finalize()?;
             return Ok(());
         }
 

@@ -3,7 +3,7 @@ use std::fs;
 use std::path::Path;
 use step::step_file::StepFile;
 
-use triangulate::wgpu_triangulate::wgpu_triangulate;
+use triangulate::wgpu_triangulate::{wgpu_triangulate, wgpu_triangulate_batch_from_examples};
 
 /// Find all STEP files in the examples directory
 fn find_step_files() -> Vec<String> {

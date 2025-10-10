@@ -98,6 +98,10 @@ pub enum Error {
     /// This indicates a logic error in the crate, but it happens occasionally
     #[error("escaped wedge when searching fixed edge")]
     WedgeEscape,
+
+    /// Indicates an internal consistency error in the hull structure
+    #[error("hull edge destination mismatch")]
+    HullMismatch,
 }
 
 ////////////////////////////////////////////////////////////////////////////////

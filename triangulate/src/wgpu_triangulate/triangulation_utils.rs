@@ -344,7 +344,7 @@ mod batch_tests {
         let results: Vec<(Mesh, Stats)> = wgpu_triangulate_batch_from_examples();
 
         //TODO: let's just sum these all up and count the number of 'failed entries' then report that.
-        assert!(results.into_iter().enumerate().all(|(e, (mesh, stats))| {
+        assert!(results.into_iter().enumerate().all(|(_e, (mesh, stats))| {
             !mesh.verts.is_empty()
                 || !mesh.triangles.is_empty()
                 || stats.num_errors == 0

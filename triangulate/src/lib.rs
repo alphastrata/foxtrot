@@ -56,6 +56,8 @@ pub enum Error {
 
     #[error("Closed NURBS and b-spline curves are not implemented")]
     ClosedCurve,
+    #[error("hull edge destination mismatch")]
+    HullMismatch,
 
     #[error("Self-intersecting NURBS and b-spline curves are not implemented")]
     SelfIntersectingCurve,

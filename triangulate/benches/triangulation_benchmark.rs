@@ -1,11 +1,6 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::fs;
 use step::step_file::StepFile;
-use triangulate::triangulate;
-
-// Import historical triangulation functions for benchmarking
-#[cfg(test)]
-use triangulate::triangulate::historical_triangulations;
 
 fn benchmark_triangulate(c: &mut Criterion) {
     // Load a test STEP file for benchmarking by reading it in the benchmark setup
@@ -29,48 +24,18 @@ fn benchmark_triangulate(c: &mut Criterion) {
 
         // Make sure the STEP file has content for meaningful benchmarking
         if !step_file.0.is_empty() {
-            // Comparison benchmark group
-            #[cfg(feature = "rayon")]
+            // WGPU benchmark group
+            #[cfg(feature = "wgpu")]
             {
-                let mut group = c.benchmark_group("triangulators");
-                group.bench_function("triangulate-original", |b| {
-                    b.iter(|| {
-                        _ = triangulate::triangulate::historical_triangulations::triangulate(&step_file);
-                    });
-                });
-                group.bench_function("triangulate-2", |b| {
-                    b.iter(|| {
-                        _ = triangulate::triangulate::historical_triangulations::triangulate2(&step_file);
-                    });
-                });
-                group.bench_function("triangulate-3", |b| {
-                    b.iter(|| {
-                        _ = triangulate::triangulate::historical_triangulations::triangulate3(&step_file);
-                    });
-                });
-                group.bench_function("triangulate-4", |b| {
-                    b.iter(|| {
-                        _ = triangulate::triangulate::historical_triangulations::triangulate4(&step_file);
-                    });
-                });
-                group.bench_function("triangulate-5", |b| {
-                    b.iter(|| {
-                        _ = triangulate::triangulate::historical_triangulations::triangulate5(&step_file);
-                    });
-                });
-                group.bench_function("triangulate-6", |b| {
-                    b.iter(|| {
-                        _ = triangulate::triangulate::historical_triangulations::triangulate6(&step_file);
-                    });
-                });
+                let mut group = c.benchmark_group("wgpu_triangulators");
                 group.bench_function("triangulate-wgpu", |b| {
                     b.iter(|| {
-                        _ = triangulate::wgpu_triangulate(&step_file);
+                        _ = triangulate::wgpu_triangulate::wgpu_triangulate(&step_file);
                     });
                 });
                 group.bench_function("triangulate-wgpu2", |b| {
                     b.iter(|| {
-                        _ = triangulate::wgpu_impl::triangulate(&step_file);
+                        _ = triangulate::wgpu_triangulate::triangulate(&step_file);
                     });
                 });
 
