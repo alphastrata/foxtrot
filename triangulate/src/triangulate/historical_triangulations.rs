@@ -4,26 +4,17 @@
 //! that are kept for benchmarking purposes but are not part of the public API.
 //! These functions are only compiled when running tests or benchmarks.
 
-#[cfg(test)]
 use ahash::AHashMap;
-#[cfg(test)]
 use std::collections::HashSet;
-#[cfg(test)]
 use std::convert::TryInto;
 
-#[cfg(test)]
 use glm::{DMat4, DVec3, DVec4, U32Vec3};
-#[cfg(test)]
 use log::{error, info, warn};
-#[cfg(test)]
 use nalgebra_glm as glm;
 
-#[cfg(all(feature = "rayon", test))]
 use rayon::iter::IntoParallelRefIterator;
-#[cfg(all(feature = "rayon", test))]
 use rayon::prelude::*;
 
-#[cfg(test)]
 use crate::{
     Error,
     curve::Curve,
@@ -33,9 +24,7 @@ use crate::{
     surface::Surface,
     triangulate::closed_shell,
 };
-#[cfg(test)]
 use nurbs::{BSplineSurface, KnotVector, NURBSSurface, SampledCurve, SampledSurface};
-#[cfg(test)]
 use step::{
     ap214,
     ap214::Entity,
@@ -44,10 +33,8 @@ use step::{
     step_file::{FromEntity, StepFile},
 };
 
-#[cfg(test)]
 type TransformStack<'a> = AHashMap<Representation<'a>, Vec<(Representation<'a>, DMat4)>>;
 
-#[cfg(test)]
 pub fn build_transform_stack<'a>(s: &'a StepFile, flip: bool) -> TransformStack<'a> {
     let mut transform_stack: TransformStack<'a> = AHashMap::new();
     for mapped_item in s.0.iter().filter_map(MappedItem_::try_from_entity) {
@@ -72,12 +59,9 @@ pub fn build_transform_stack<'a>(s: &'a StepFile, flip: bool) -> TransformStack<
     transform_stack
 }
 
-#[cfg(test)]
 const SAVE_DEBUG_SVGS: bool = false;
-#[cfg(test)]
 const SAVE_PANIC_SVGS: bool = false;
 
-#[cfg(test)]
 pub struct FaceTask<'a> {
     pub face_id: AdvancedFace<'a>,
     pub transforms: Vec<DMat4>,
@@ -86,7 +70,6 @@ pub struct FaceTask<'a> {
 }
 
 /// Original triangulation implementation
-#[cfg(test)]
 pub fn triangulate(s: &StepFile) -> (Mesh, Stats) {
     let styled_items: Vec<_> =
         s.0.iter()
@@ -283,7 +266,6 @@ pub fn triangulate(s: &StepFile) -> (Mesh, Stats) {
     (mesh, stats)
 }
 
-#[cfg(test)]
 fn item_defined_transformation(s: &StepFile, t: Id<ItemDefinedTransformation_>) -> DMat4 {
     let i = s.entity(t).expect("Could not get ItemDefinedTransform");
 
@@ -298,7 +280,6 @@ fn item_defined_transformation(s: &StepFile, t: Id<ItemDefinedTransformation_>) 
     t2 * t1.try_inverse().expect("Could not invert transform matrix")
 }
 
-#[cfg(test)]
 pub fn presentation_style_color(s: &StepFile, p: PresentationStyleAssignment) -> Option<DVec3> {
     // AAAAAHHHHH
     s.entity(p)
@@ -338,13 +319,11 @@ pub fn presentation_style_color(s: &StepFile, p: PresentationStyleAssignment) ->
         .map(|c| DVec3::new(c.red, c.green, c.blue))
 }
 
-#[cfg(test)]
 pub fn cartesian_point(s: &StepFile, a: Id<CartesianPoint_>) -> DVec3 {
     let p = s.entity(a).expect("Could not get cartesian point");
     DVec3::new(p.coordinates[0].0, p.coordinates[1].0, p.coordinates[2].0)
 }
 
-#[cfg(test)]
 pub fn direction(s: &StepFile, a: Direction) -> DVec3 {
     let p = s.entity(a).expect("Could not get cartesian point");
     DVec3::new(
@@ -354,7 +333,6 @@ pub fn direction(s: &StepFile, a: Direction) -> DVec3 {
     )
 }
 
-#[cfg(test)]
 pub fn axis2_placement_3d(s: &StepFile, t: Id<Axis2Placement3d_>) -> (DVec3, DVec3, DVec3) {
     let a = s.entity(t).expect("Could not get Axis2Placement3d");
     let location = cartesian_point(s, a.location);
@@ -367,7 +345,6 @@ pub fn axis2_placement_3d(s: &StepFile, t: Id<Axis2Placement3d_>) -> (DVec3, DVe
     (location, axis, ref_direction)
 }
 
-#[cfg(test)]
 fn shell(s: &StepFile, c: Shell, mesh: &mut Mesh, stats: &mut Stats) {
     match &s[c] {
         Entity::ClosedShell(_) => closed_shell(s, c.cast(), mesh, stats),
@@ -376,7 +353,6 @@ fn shell(s: &StepFile, c: Shell, mesh: &mut Mesh, stats: &mut Stats) {
     }
 }
 
-#[cfg(test)]
 fn open_shell(s: &StepFile, c: OpenShell, mesh: &mut Mesh, stats: &mut Stats) {
     let cs = s.entity(c).expect("Could not get OpenShell");
     for face in &cs.cfs_faces {
@@ -387,7 +363,6 @@ fn open_shell(s: &StepFile, c: OpenShell, mesh: &mut Mesh, stats: &mut Stats) {
     stats.num_shells += 1;
 }
 
-#[cfg(test)]
 fn closed_shell_historical(s: &StepFile, c: ClosedShell, mesh: &mut Mesh, stats: &mut Stats) {
     let cs = s.entity(c).expect("Could not get ClosedShell");
     for face in &cs.cfs_faces {
@@ -400,7 +375,6 @@ fn closed_shell_historical(s: &StepFile, c: ClosedShell, mesh: &mut Mesh, stats:
 
 /// Cached triangulation implementation (version 6)
 /// This version uses a pre-built entity cache to avoid redundant lookups
-#[cfg(all(feature = "rayon", test))]
 pub fn triangulate6(s: &StepFile) -> (Mesh, Stats) {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -575,7 +549,6 @@ pub fn triangulate6(s: &StepFile) -> (Mesh, Stats) {
     (mesh, stats)
 }
 
-#[cfg(test)]
 struct EntityCache<'a> {
     step_file: &'a StepFile<'a>,
     // Cache commonly accessed entity types
@@ -588,7 +561,6 @@ struct EntityCache<'a> {
     vertex_points: AHashMap<Id<VertexPoint_<'a>>, DVec3>,
 }
 
-#[cfg(test)]
 impl<'a> EntityCache<'a> {
     fn new(s: &'a StepFile) -> Self {
         // Pre-populate common lookups
@@ -846,7 +818,6 @@ impl<'a> EntityCache<'a> {
     }
 }
 
-#[cfg(test)]
 fn triangulate_face_cached<'a>(
     s: &'a StepFile<'a>,
     cache: &mut EntityCache<'a>,
@@ -922,7 +893,6 @@ fn triangulate_face_cached<'a>(
     Ok(())
 }
 
-#[cfg(test)]
 fn face_bound2(s: &StepFile, cache: &mut EntityCache, b: FaceBound) -> Result<Vec<DVec3>, Error> {
     let (bound, orientation) = match &s[b] {
         Entity::FaceBound(b) => (b.bound, b.orientation),
@@ -946,7 +916,6 @@ fn face_bound2(s: &StepFile, cache: &mut EntityCache, b: FaceBound) -> Result<Ve
     }
 }
 
-#[cfg(test)]
 fn edge_loop2(
     s: &StepFile,
     cache: &mut EntityCache,
@@ -969,7 +938,6 @@ fn edge_loop2(
     Ok(out)
 }
 
-#[cfg(test)]
 fn edge_curve2(
     s: &StepFile,
     cache: &mut EntityCache,
@@ -990,7 +958,6 @@ fn edge_curve2(
     Ok(curve.build(u, v))
 }
 
-#[cfg(test)]
 fn curve2(
     s: &StepFile,
     cache: &mut EntityCache,
@@ -1096,7 +1063,6 @@ fn curve2(
     })
 }
 
-#[cfg(test)]
 fn advanced_face(
     s: &StepFile,
     f: AdvancedFace,
@@ -1246,7 +1212,6 @@ fn advanced_face(
     Ok(())
 }
 
-#[cfg(test)]
 pub fn get_surface(s: &StepFile, surf: ap214::Surface) -> Result<Surface, Error> {
     match &s[surf] {
         Entity::CylindricalSurface(c) => {
@@ -1392,17 +1357,14 @@ pub fn get_surface(s: &StepFile, surf: ap214::Surface) -> Result<Surface, Error>
     }
 }
 
-#[cfg(test)]
 pub fn control_points_1d(s: &StepFile, row: &Vec<CartesianPoint>) -> Vec<DVec3> {
     row.iter().map(|p| cartesian_point(s, *p)).collect()
 }
 
-#[cfg(test)]
 pub fn control_points_2d(s: &StepFile, rows: &Vec<Vec<CartesianPoint>>) -> Vec<Vec<DVec3>> {
     rows.iter().map(|row| control_points_1d(s, row)).collect()
 }
 
-#[cfg(test)]
 pub fn face_bound(s: &StepFile, b: FaceBound) -> Result<Vec<DVec3>, Error> {
     let (bound, orientation) = match &s[b] {
         Entity::FaceBound(b) => (b.bound, b.orientation),
@@ -1426,7 +1388,6 @@ pub fn face_bound(s: &StepFile, b: FaceBound) -> Result<Vec<DVec3>, Error> {
     }
 }
 
-#[cfg(test)]
 pub fn edge_loop(s: &StepFile, edge_list: &[OrientedEdge]) -> Result<Vec<DVec3>, Error> {
     let mut out = Vec::new();
     for (i, e) in edge_list.iter().enumerate() {
@@ -1442,7 +1403,6 @@ pub fn edge_loop(s: &StepFile, edge_list: &[OrientedEdge]) -> Result<Vec<DVec3>,
     Ok(out)
 }
 
-#[cfg(test)]
 pub fn edge_curve(s: &StepFile, e: EdgeCurve, orientation: bool) -> Result<Vec<DVec3>, Error> {
     let edge_curve = s.entity(e).expect("Could not get EdgeCurve");
     let curve = curve(s, edge_curve, edge_curve.edge_geometry, orientation)?;
@@ -1457,7 +1417,6 @@ pub fn edge_curve(s: &StepFile, e: EdgeCurve, orientation: bool) -> Result<Vec<D
     Ok(curve.build(u, v))
 }
 
-#[cfg(test)]
 pub fn curve(
     s: &StepFile,
     edge_curve: &ap214::EdgeCurve_,
@@ -1562,7 +1521,6 @@ pub fn curve(
     })
 }
 
-#[cfg(test)]
 pub fn vertex_point(s: &StepFile, v: Vertex) -> DVec3 {
     cartesian_point(
         s,
@@ -1574,7 +1532,6 @@ pub fn vertex_point(s: &StepFile, v: Vertex) -> DVec3 {
 }
 
 /// Rayon-based triangulation implementation (version 2)
-#[cfg(all(feature = "rayon", test))]
 pub fn triangulate2(s: &StepFile) -> (Mesh, Stats) {
     use nalgebra::{Matrix4, Vector3, Vector4};
     use rayon::prelude::*;
@@ -1839,7 +1796,6 @@ pub fn triangulate2(s: &StepFile) -> (Mesh, Stats) {
 }
 
 /// Rayon-based triangulation implementation (version 3)
-#[cfg(all(feature = "rayon", test))]
 pub fn triangulate3(s: &StepFile) -> (Mesh, Stats) {
     use nalgebra::{Matrix4, Vector3, Vector4};
     use rayon::prelude::*;
@@ -2054,7 +2010,6 @@ pub fn triangulate3(s: &StepFile) -> (Mesh, Stats) {
 }
 
 // Helper function: triangulate a single face into local mesh
-#[cfg(test)]
 pub fn advanced_face_to_mesh(
     s: &StepFile,
     f: AdvancedFace,
@@ -2159,7 +2114,6 @@ pub fn advanced_face_to_mesh(
 
 /// Truly optimized batched triangulation that processes all faces in a single GPU operation
 /// This addresses the performance issues by eliminating per-face CPU-GPU transfers
-#[cfg(all(feature = "wgpu", test))]
 pub fn triangulate5(s: &StepFile) -> (Mesh, Stats) {
     // Phase 1: Build face catalog with minimal allocations
     let brep_colors: AHashMap<_, DVec3> =
@@ -2265,7 +2219,6 @@ pub fn triangulate5(s: &StepFile) -> (Mesh, Stats) {
 
 /// Truly optimized batched triangulation that processes all faces in a single GPU operation
 /// using a pre-existing GPU context for optimal resource reuse
-#[cfg(all(feature = "wgpu", test))]
 pub fn triangulate5_with_context(
     s: &StepFile,
     gpu_context: &crate::wgpu_triangulate::GPUContext,
@@ -2371,7 +2324,6 @@ pub fn triangulate5_with_context(
     gpu_context.triangulate_faces(s, &face_tasks)
 }
 
-#[cfg(test)]
 pub fn transform_stack_roots<'a>(transform_stack: &TransformStack<'a>) -> Vec<Representation<'a>> {
     let children: HashSet<_> = transform_stack
         .values()
@@ -2385,7 +2337,6 @@ pub fn transform_stack_roots<'a>(transform_stack: &TransformStack<'a>) -> Vec<Re
         .collect()
 }
 
-#[cfg(test)]
 pub fn collect_faces_from_brep<'a>(
     s: &'a StepFile,
     rep_item_id: Id<RepresentationItem_<'a>>,

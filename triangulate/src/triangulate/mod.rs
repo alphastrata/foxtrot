@@ -10,7 +10,7 @@ use nalgebra_glm as glm;
 pub mod cached_triangulation;
 
 // Import the historical triangulations module for tests and benchmarks only
-#[cfg(test)]
+#[cfg(feature = "historical")]
 pub mod historical_triangulations;
 
 use crate::{

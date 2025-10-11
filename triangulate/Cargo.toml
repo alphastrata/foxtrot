@@ -26,21 +26,22 @@ criterion = { workspace = true, features = ["html_reports"] }
 env_logger = { workspace = true }
 
 [features]
+default = []
 rayon = ["dep:rayon", "step/rayon", "dep:nalgebra"]
 wgpu = ["dep:wgpu", "dep:pollster", "dep:bytemuck", "rayon"]
-test = ["wgpu", "rayon"]
+historical = ["wgpu", "rayon"]
 
 [[bench]]
 name = 'triangulation_benchmark'
 harness = false
-required-features = ["rayon", "wgpu"]
+required-features = ["historical"]
 
 [[bench]]
 name = 'batch_triangulation'
 harness = false
-required-features = ["rayon", "wgpu"]
+required-features = ["historical"]
 
 [[bench]]
 name = 'batch_scaling'
 harness = false
-required-features = ["rayon", "wgpu"]
+required-features = ["historical"]
