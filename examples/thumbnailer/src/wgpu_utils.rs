@@ -1,4 +1,3 @@
-
 use wgpu::{
     Device, DeviceDescriptor, Extent3d, Features, Instance, InstanceDescriptor, Limits,
     MemoryHints, PowerPreference, Queue, RequestAdapterOptions, Texture, TextureDescriptor,
@@ -18,7 +17,7 @@ pub fn create_wgpu_device() -> Result<(Device, Queue), Box<dyn std::error::Error
     let (device, queue) = pollster::block_on(adapter.request_device(&DeviceDescriptor {
         label: None,
         // Request the feature for wireframe rendering
-        required_features: Features::POLYGON_MODE_LINE,
+        required_features: Features::POLYGON_MODE_LINE, // https://docs.rs/wgpu/latest/wgpu/struct.FeaturesWGPU.html#associatedconstant.POLYGON_MODE_LINE
         required_limits: Limits::default(),
         memory_hints: MemoryHints::Performance,
         trace: Trace::Off,
